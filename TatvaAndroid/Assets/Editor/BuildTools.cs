@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "1.3";
-        PlayerSettings.Android.bundleVersionCode = 4;
+        PlayerSettings.bundleVersion = "1.4";
+        PlayerSettings.Android.bundleVersionCode = 5;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
@@ -358,7 +358,7 @@ public static class BuildTools
     /// <summary>Gyro speed steering: dead zone, monotonic, symmetric, saturates, and the sim follows the rate.</summary>
     static void TestTilt(List<string> errors)
     {
-        foreach (float gain in new[] { 1f, 1.6f, 2.5f })
+        foreach (float gain in new[] { 0.7f, 1f, 1.6f })
         {
             if (Steering.TiltToRate(Steering.DeadZone * 0.9f, gain) != 0) errors.Add("tilt dead zone leaks at gain " + gain);
             float prev = 0;
@@ -370,7 +370,7 @@ public static class BuildTools
                 prev = r;
             }
             float full = Steering.TiltToRate(Steering.FullTilt(gain) + 0.01f, gain);
-            if (Mathf.Abs(full - Sim.MaxRate) > 1e-3f) errors.Add($"tilt does not reach full speed at gain {gain}");
+            if (Mathf.Abs(full - Steering.GyroMaxRate) > 1e-3f) errors.Add($"tilt does not reach full speed at gain {gain}");
         }
         var sim = new Sim(8);
         sim.Reset(Mode.Play);
@@ -378,7 +378,7 @@ public static class BuildTools
         for (int i = 0; i < 30; i++) sim.Update(1f / 60f, new SteerCmd { HasRate = true, Rate = 3f });
         float moved = Sim.AngDiff(sim.Theta, t0);
         if (moved < 0.8f || moved > 1.6f) errors.Add($"sim did not follow a 3 rad/s rate for 0.5s (moved {moved:0.00} rad)");
-        Debug.Log($"[SelfTest] tilt: full speed at {Steering.FullTilt(1.6f) * Mathf.Rad2Deg:0} deg (1.6x), sim followed rate ({moved:0.00} rad in 0.5s).");
+        Debug.Log($"[SelfTest] tilt: full speed at {Steering.FullTilt(1.25f) * Mathf.Rad2Deg:0} deg (1.25x), {Steering.TiltToRate(15 * Mathf.Deg2Rad, 1.25f):0.0} rad/s at 15 deg, sim followed rate ({moved:0.00} rad in 0.5s).");
     }
 
     // ---------- build ----------

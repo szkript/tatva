@@ -38,7 +38,7 @@ namespace Tatva
         public const float D = 1.6f;                           // world distance per beat
         public const float HB = 0.035f, GRAZE = 0.19f;         // hit forgiveness, graze window (radians)
         public const float Bottom = -Mathf.PI / 2f;
-        public const float MaxRate = 10f;                      // fastest the ship can circle, rad/s
+        public const float MaxRate = 12f;                      // fastest the ship can circle under tilt steering, rad/s
 
         public static readonly float[] PAL = { 326, 188, 42, 268, 150, 14, 205, 295 };
         public static readonly string[] ZNAMES = { "Ébredés", "Sodrás", "Aranyér", "Örvény", "Zöld fény", "Izzás", "Mélykék", "Tátva" };
@@ -254,7 +254,8 @@ namespace Tatva
                 else if (cmd.HasTarget) want = Mathf.Clamp(AngDiff(cmd.Target - Roll, Theta) * 14, -10, 10);
                 else if (cmd.HasRate) want = Mathf.Clamp(cmd.Rate, -MaxRate, MaxRate);
                 else want = Mathf.Clamp(cmd.Axis, -1, 1) * 7;
-                Omega += (want - Omega) * Mathf.Min(1, dtR * 18);
+                // tilt steering responds almost instantly; pointer/keys keep a little smoothing
+                Omega += (want - Omega) * Mathf.Min(1, dtR * (cmd.HasRate ? 45 : 18));
                 Theta = Mod(Theta + Omega * dtR * Mathf.Max(Ts, 0.6f));
             }
 

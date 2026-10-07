@@ -18,7 +18,7 @@ namespace Tatva
     public sealed class Steering
     {
         public Control Mode = Control.Gyro;
-        public float Gain = 1.6f;
+        public float Gain = 1.25f;
 
         float est = Sim.Bottom, lastMeas, gyroSign = 1, signVotes, snap;
         bool init, haveLast, hasTouch;
@@ -85,17 +85,18 @@ namespace Tatva
             return hasTouch ? new SteerCmd { HasTarget = true, Target = touchAngle } : default;
         }
 
-        public const float DeadZone = 4f * Mathf.Deg2Rad;
-        /// <summary>Tilt at which the ship reaches full speed; 45 degrees at 1x sensitivity, less when higher.</summary>
-        public static float FullTilt(float gain) => 45f * Mathf.Deg2Rad / Mathf.Max(0.5f, gain);
+        public const float DeadZone = 3f * Mathf.Deg2Rad;
+        public const float GyroMaxRate = Sim.MaxRate;
+        /// <summary>Tilt at which the ship reaches full speed; 30 degrees at 1x sensitivity, less when higher.</summary>
+        public static float FullTilt(float gain) => 30f * Mathf.Deg2Rad / Mathf.Max(0.5f, gain);
 
-        /// <summary>Tilt (radians from level, signed) to angular speed. Dead zone, then an ease-in curve for fine control.</summary>
+        /// <summary>Tilt (radians from level, signed) to angular speed. Small dead zone, then a nearly linear ramp.</summary>
         public static float TiltToRate(float tilt, float gain)
         {
             float a = Mathf.Abs(tilt), full = FullTilt(gain);
             if (a <= DeadZone) return 0f;
             float u = Mathf.Clamp01((a - DeadZone) / (full - DeadZone));
-            return Mathf.Sign(tilt) * Sim.MaxRate * Mathf.Pow(u, 1.4f);
+            return Mathf.Sign(tilt) * GyroMaxRate * Mathf.Pow(u, 1.15f);
         }
 
         /// <summary>Signed tilt of the phone away from level, radians.</summary>
@@ -128,14 +129,15 @@ namespace Tatva
                 if (Mathf.Abs(dm) > 0.003f && Mathf.Abs(dg) > 0.003f)
                 {
                     signVotes = Mathf.Clamp(signVotes + Mathf.Sign(dm * dg), -30, 30);
-                    if (signVotes < -12) { gyroSign = -gyroSign; signVotes = 0; }
+                    if (signVotes < -5) { gyroSign = -gyroSign; signVotes = 0; }
                 }
             }
             lastMeas = meas; haveLast = mag > 0.5f;
 
             // gravity correction, weighted by how much gravity lies in the screen plane
             float w = Mathf.Clamp01((mag - 0.25f) / 0.5f);
-            est = Sim.Mod(est + Sim.AngDiff(meas, est) * Mathf.Min(1f, dt * 6f * w));
+            // gentle pull: the gyro carries fast motion, gravity (slower, filtered by the OS) only removes drift
+            est = Sim.Mod(est + Sim.AngDiff(meas, est) * Mathf.Min(1f, dt * 2.5f * w));
 
             return Sim.AngDiff(est, Sim.Bottom) * (Mode == Control.GyroInverted ? -1 : 1);
         }

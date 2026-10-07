@@ -8,8 +8,8 @@ namespace Tatva
     /// </summary>
     public sealed class GameRoot : MonoBehaviour
     {
-        const string BestKey = "tatva.best", ControlKey = "tatva.control", GainKey = "tatva.gain";
-        static readonly float[] Gains = { 1f, 1.3f, 1.6f, 2f, 2.5f };
+        const string BestKey = "tatva.best", ControlKey = "tatva.control", GainKey = "tatva.gain2"; // v1.4 recalibrated the scale; old saved values are ignored
+        static readonly float[] Gains = { 0.85f, 1f, 1.25f, 1.6f, 2f };
 
         Camera cam;
         Painter painter;
@@ -35,7 +35,7 @@ namespace Tatva
             steering = new Steering
             {
                 Mode = (Control)Mathf.Clamp(PlayerPrefs.GetInt(ControlKey, Steering.HasGyro ? 0 : 2), 0, 2),
-                Gain = PlayerPrefs.GetFloat(GainKey, 1.6f),
+                Gain = PlayerPrefs.GetFloat(GainKey, 1.25f),
             };
             if (!Steering.HasGyro) steering.Mode = Control.Touch;
             steering.Enable();
