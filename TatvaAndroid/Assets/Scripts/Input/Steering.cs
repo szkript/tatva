@@ -5,9 +5,9 @@ namespace Tatva
     public enum Control { Gyro, GyroInverted, Touch }
 
     /// <summary>
-    /// Turns the phone into a steering wheel with speed control: the tilt away from level sets how
-    /// fast the ship circles the tunnel (small tilt = slow, more tilt = faster, level = it stays put),
-    /// so the phone never has to turn more than a quarter turn.
+    /// Turns the phone into a steering wheel. A light tilt moves the ship directly and precisely
+    /// (small rotation = small move); a bigger tilt makes it keep circling, faster the more the
+    /// phone is tilted, so the phone never has to turn more than a quarter turn.
     ///
     /// Sensor fusion (complementary filter): the gyroscope's rotation rate around the screen
     /// normal is integrated every frame (fast, smooth, works with the phone lying flat), and the
@@ -33,7 +33,7 @@ namespace Tatva
             Input.gyro.updateInterval = 1f / 60f;
         }
 
-        public void Recenter() { init = false; hasTouch = false; snap = 0; }
+        public void Recenter() { init = false; hasTouch = false; snap = 0; mapper.Reset(); }
 
         /// <summary>
         /// The sensors report in the device's natural (portrait) axes; the game steers in screen axes.
@@ -61,7 +61,7 @@ namespace Tatva
         /// <summary>Current steering angle for UI feedback (title-screen indicator).</summary>
         public float Estimate => est;
 
-        public SteerCmd Read(float dt, Vector2 screenCenter, float deadRadius)
+        public SteerCmd Read(float dt, Vector2 screenCenter, float deadRadius, float theta)
         {
             float axis = 0;
             if (Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.A)) axis -= 1;
@@ -71,7 +71,7 @@ namespace Tatva
             if (Mode != Control.Touch && HasGyro)
             {
                 float tilt = ReadGyro(dt);
-                return new SteerCmd { HasRate = true, Rate = TiltToRate(tilt, Gain) };
+                return new SteerCmd { HasTunnelTarget = true, Target = mapper.Step(tilt, Gain, dt, theta) };
             }
 
             Vector2? p = null;
@@ -85,19 +85,54 @@ namespace Tatva
             return hasTouch ? new SteerCmd { HasTarget = true, Target = touchAngle } : default;
         }
 
-        public const float DeadZone = 3f * Mathf.Deg2Rad;
-        public const float GyroMaxRate = Sim.MaxRate;
-        /// <summary>Tilt at which the ship reaches full speed; 30 degrees at 1x sensitivity, less when higher.</summary>
-        public static float FullTilt(float gain) => 30f * Mathf.Deg2Rad / Mathf.Max(0.5f, gain);
+        // ---------- hybrid tilt mapping ----------
+        // Up to DirectZone the tilt moves the ship directly (position control: tilt a little, the ship
+        // moves a little and stops). Past it the ship keeps circling, faster the more the phone is tilted
+        // (rate control). At the boundary the direct offset is at its maximum and the rate starts at zero,
+        // so the two blend without a jump.
 
-        /// <summary>Tilt (radians from level, signed) to angular speed. Small dead zone, then a nearly linear ramp.</summary>
+        public const float DirectZone = 10f * Mathf.Deg2Rad;
+        public const float GyroMaxRate = Sim.MaxRate;
+        /// <summary>Ship degrees per phone degree inside the direct zone.</summary>
+        public static float DirectGain(float gain) => 2f * gain;
+        /// <summary>Tilt at which circling reaches full speed: 10 + 25/sensitivity degrees.</summary>
+        public static float FullTilt(float gain) => DirectZone + 25f * Mathf.Deg2Rad / Mathf.Max(0.5f, gain);
+
+        /// <summary>Circling speed for a tilt (radians from level, signed); zero inside the direct zone.</summary>
         public static float TiltToRate(float tilt, float gain)
         {
-            float a = Mathf.Abs(tilt), full = FullTilt(gain);
-            if (a <= DeadZone) return 0f;
-            float u = Mathf.Clamp01((a - DeadZone) / (full - DeadZone));
-            return Mathf.Sign(tilt) * GyroMaxRate * Mathf.Pow(u, 1.15f);
+            float a = Mathf.Abs(tilt);
+            if (a <= DirectZone) return 0f;
+            float u = Mathf.Clamp01((a - DirectZone) / (FullTilt(gain) - DirectZone));
+            return Mathf.Sign(tilt) * GyroMaxRate * Mathf.Pow(u, 1.5f);
         }
+
+        /// <summary>Turns tilt into a target angle in tunnel space. Plain C# so the self-test can drive it.</summary>
+        public sealed class TiltMapper
+        {
+            float anchor;
+            bool init;
+            public void Reset() => init = false;
+
+            public float Step(float tilt, float gain, float dt, float theta)
+            {
+                float direct = DirectGain(gain) * Mathf.Clamp(tilt, -DirectZone, DirectZone);
+                if (!init) { anchor = Sim.Mod(theta - direct); init = true; }
+                anchor = Sim.Mod(anchor + TiltToRate(tilt, gain) * dt);
+                float target = Sim.Mod(anchor + direct);
+                // anti-windup: never let the target run more than ~70 degrees ahead of the ship
+                float lead = Sim.AngDiff(target, theta);
+                if (Mathf.Abs(lead) > 1.2f)
+                {
+                    float fix = lead - Mathf.Sign(lead) * 1.2f;
+                    anchor = Sim.Mod(anchor - fix);
+                    target = Sim.Mod(target - fix);
+                }
+                return target;
+            }
+        }
+
+        readonly TiltMapper mapper = new TiltMapper();
 
         /// <summary>Signed tilt of the phone away from level, radians.</summary>
         float ReadGyro(float dt)

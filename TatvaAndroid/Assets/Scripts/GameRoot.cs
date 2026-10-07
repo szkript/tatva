@@ -212,7 +212,7 @@ namespace Tatva
                 if (hud.TitleVisible || overShown) StartGame(); else if (paused) SetPaused(false);
             }
 
-            var cmd = steering.Read(dtR, new Vector2(w / 2f, h / 2f), Mathf.Min(w, h) * 0.05f);
+            var cmd = steering.Read(dtR, new Vector2(w / 2f, h / 2f), Mathf.Min(w, h) * 0.05f, sim.Theta);
             if (!paused)
             {
                 sim.Update(dtR, cmd);

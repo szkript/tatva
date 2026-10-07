@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "1.4";
-        PlayerSettings.Android.bundleVersionCode = 5;
+        PlayerSettings.bundleVersion = "1.5";
+        PlayerSettings.Android.bundleVersionCode = 6;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
@@ -355,30 +355,69 @@ public static class BuildTools
         }
     }
 
-    /// <summary>Gyro speed steering: dead zone, monotonic, symmetric, saturates, and the sim follows the rate.</summary>
+    /// <summary>
+    /// Hybrid gyro steering, driven closed-loop through TiltMapper and Sim:
+    /// a light tilt gives a small, immediate move that holds; levelling brings the ship back;
+    /// a big tilt keeps the ship circling fast; the rate curve is zero in the direct zone,
+    /// monotonic, symmetric and saturates.
+    /// </summary>
     static void TestTilt(List<string> errors)
     {
-        foreach (float gain in new[] { 0.7f, 1f, 1.6f })
+        foreach (float gain in new[] { 0.85f, 1.25f, 2f })
         {
-            if (Steering.TiltToRate(Steering.DeadZone * 0.9f, gain) != 0) errors.Add("tilt dead zone leaks at gain " + gain);
+            if (Steering.TiltToRate(Steering.DirectZone * 0.95f, gain) != 0) errors.Add("rate leaks into the direct zone at gain " + gain);
             float prev = 0;
-            for (int d = 5; d <= 90; d++)
+            for (int d = 1; d <= 90; d++)
             {
                 float r = Steering.TiltToRate(d * Mathf.Deg2Rad, gain);
                 if (r < prev - 1e-5f) errors.Add($"tilt rate not monotonic at {d} deg, gain {gain}");
                 if (Mathf.Abs(r + Steering.TiltToRate(-d * Mathf.Deg2Rad, gain)) > 1e-5f) errors.Add("tilt rate not symmetric");
                 prev = r;
             }
-            float full = Steering.TiltToRate(Steering.FullTilt(gain) + 0.01f, gain);
-            if (Mathf.Abs(full - Steering.GyroMaxRate) > 1e-3f) errors.Add($"tilt does not reach full speed at gain {gain}");
+            if (Mathf.Abs(Steering.TiltToRate(Steering.FullTilt(gain) + 0.01f, gain) - Steering.GyroMaxRate) > 1e-3f)
+                errors.Add($"tilt does not reach full speed at gain {gain}");
         }
+
+        const float G = 1.25f, dt = 1f / 60f;
         var sim = new Sim(8);
         sim.Reset(Mode.Play);
-        float t0 = sim.Theta;
-        for (int i = 0; i < 30; i++) sim.Update(1f / 60f, new SteerCmd { HasRate = true, Rate = 3f });
-        float moved = Sim.AngDiff(sim.Theta, t0);
-        if (moved < 0.8f || moved > 1.6f) errors.Add($"sim did not follow a 3 rad/s rate for 0.5s (moved {moved:0.00} rad)");
-        Debug.Log($"[SelfTest] tilt: full speed at {Steering.FullTilt(1.25f) * Mathf.Rad2Deg:0} deg (1.25x), {Steering.TiltToRate(15 * Mathf.Deg2Rad, 1.25f):0.0} rad/s at 15 deg, sim followed rate ({moved:0.00} rad in 0.5s).");
+        var map = new Steering.TiltMapper();
+        float travelled = 0;
+        float Run(float tiltDeg, float seconds)
+        {
+            float start = travelled;
+            for (int i = 0; i < Mathf.RoundToInt(seconds / dt); i++)
+            {
+                float before = sim.Theta;
+                float target = map.Step(tiltDeg * Mathf.Deg2Rad, G, dt, sim.Theta);
+                sim.Update(dt, new SteerCmd { HasTunnelTarget = true, Target = target });
+                travelled += Sim.AngDiff(sim.Theta, before);
+            }
+            return travelled - start;
+        }
+
+        Run(0, 0.2f);
+        float expect = Steering.DirectGain(G) * 5f * Mathf.Deg2Rad;
+        float quick = Run(5, 0.15f);
+        float small = quick + Run(5, 0.85f);
+        float hold = Run(5, 0.5f);
+        float back = Run(0, 0.6f);
+        if (quick < expect * 0.7f) errors.Add($"light tilt reacts slowly: {quick * Mathf.Rad2Deg:0.0} of {expect * Mathf.Rad2Deg:0.0} deg after 0.15s");
+        if (Mathf.Abs(small - expect) > expect * 0.15f) errors.Add($"light tilt moved {small * Mathf.Rad2Deg:0.0} deg, expected {expect * Mathf.Rad2Deg:0.0}");
+        if (Mathf.Abs(hold) > 0.01f) errors.Add($"light tilt keeps drifting ({hold * Mathf.Rad2Deg:0.0} deg in 0.5s)");
+        if (Mathf.Abs(back + small) > 0.03f) errors.Add($"levelling did not bring the ship back ({(back + small) * Mathf.Rad2Deg:0.0} deg off)");
+
+        var sim2 = new Sim(9); sim2.Reset(Mode.Play); sim = sim2; map.Reset();
+        Run(0, 0.1f);
+        float medium = Run(18, 1f);
+        var sim3 = new Sim(10); sim3.Reset(Mode.Play); sim = sim3; map.Reset();
+        Run(0, 0.1f);
+        float big = Run(35, 1f);
+        if (!(medium > small * 2 && big > medium * 1.5f && big > 6f))
+            errors.Add($"bigger tilt is not faster: 5deg {small:0.00}, 18deg {medium:0.00}, 35deg {big:0.00} rad in 1s");
+
+        Debug.Log($"[SelfTest] tilt (1.25x): 5deg -> {small * Mathf.Rad2Deg:0} deg move ({quick / expect * 100:0}% within 0.15s, holds, returns); " +
+                  $"18deg -> {medium:0.0} rad/s; 35deg -> {big:0.0} rad/s.");
     }
 
     // ---------- build ----------

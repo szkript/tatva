@@ -19,8 +19,7 @@ namespace Tatva
         public bool HasTarget;
         public float Target; // screen angle, radians, y-up, counter-clockwise
         public float Axis;   // -1..1, used when there is no target
-        public bool HasRate;
-        public float Rate;   // angular speed in rad/s (gyro steering wheel), counter-clockwise positive
+        public bool HasTunnelTarget; // Target is in tunnel space (gyro), not screen space (touch)
     }
 
     /// <summary>
@@ -252,10 +251,10 @@ namespace Tatva
                 float want;
                 if (Mode == Mode.Title) want = Mathf.Clamp(AngDiff(AiTarget(), Theta) * 14, -9, 9);
                 else if (cmd.HasTarget) want = Mathf.Clamp(AngDiff(cmd.Target - Roll, Theta) * 14, -10, 10);
-                else if (cmd.HasRate) want = Mathf.Clamp(cmd.Rate, -MaxRate, MaxRate);
+                else if (cmd.HasTunnelTarget) want = Mathf.Clamp(AngDiff(cmd.Target, Theta) * 18, -MaxRate, MaxRate);
                 else want = Mathf.Clamp(cmd.Axis, -1, 1) * 7;
                 // tilt steering responds almost instantly; pointer/keys keep a little smoothing
-                Omega += (want - Omega) * Mathf.Min(1, dtR * (cmd.HasRate ? 45 : 18));
+                Omega += (want - Omega) * Mathf.Min(1, dtR * (cmd.HasTunnelTarget ? 45 : 18));
                 Theta = Mod(Theta + Omega * dtR * Mathf.Max(Ts, 0.6f));
             }
 
