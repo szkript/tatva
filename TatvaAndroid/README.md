@@ -8,16 +8,19 @@ Landscape only (manifest `userLandscape`). The menus flip between the two landsc
 
 ## Controls
 
-- **Gyroscope (default): hybrid steering wheel** (`Steering.TiltMapper`), from the owner's request "small rotation = small, reactive move; more rotation = heavier move":
-  - up to 10° of tilt from level is **position control**: the ship moves 2×sensitivity degrees per phone degree, immediately (98% within 0.15 s in the self-test), holds while the phone holds, and comes back when the phone is levelled;
-  - past 10° the ship **keeps circling**, faster with more tilt (`TiltToRate`, full 12 rad/s at 10 + 25/sensitivity degrees). At the boundary the direct offset is at its maximum and the rate is zero, so the two blend.
+- **Gyroscope (default): rotation-speed steering** (`Steering.RotationMapper`, v1.6), from the owner's request "when I stop rotating the phone the ship should stop; the harder it rotates, the faster it should move; rotating back must be easy":
+  - only the phone's rotation **speed** moves the ship, never its angle. Stop turning and the ship stops, wherever the phone is held;
+  - the response is superlinear like mouse acceleration (`RateToShip` = 3.5 x sensitivity x (r - 0.05)^2 rad/s). In the self-test at 1.25x, a 30 degree phone turn moves the ship 27 degrees when slow (0.3 rad/s), 117 when normal (1 rad/s) and 190 on a flick (3 rad/s). A slow turn back keeps 89% of a dodge, so the phone can be eased back to level;
+  - the target may lead the ship by at most 1.6 rad (`LeadLimit`).
 - **Sensor fusion:** the gyro rate around the screen normal is integrated and pulled gently (2.5/s) toward gravity's direction in the screen plane, so it also works with the phone lying flat. Gravity is rotated into screen axes per orientation, the gyro axis sign is learned from gravity, and the first reading of a run snaps by a quarter turn if a device reports its axes differently.
-- **Rejected:** v1.0 "marble" absolute steering (the ship went to real-world down, so you had to turn the phone all the way round). v1.3/v1.4 pure rate control (tilt = speed) was called too slow to react, *not* too sensitive; softening it was the wrong direction.
+- **Rejected:** v1.5 hybrid (tilt up to 10 degrees = position, beyond = circling): holding a tilt kept the ship moving and rotating back was hard. v1.0 "marble" absolute steering (the ship went to real-world down, so you had to turn the phone all the way round). v1.3/v1.4 pure rate control (tilt = speed) was called too slow to react, *not* too sensitive; softening it was the wrong direction.
 - The title screen toggles the control mode (gyroscope / gyroscope inverted / touch) and the sensitivity (0.85×–2×, default 1.25×, saved under `tatva.gain2`).
 - Touch: tap anywhere on the ring and the ship turns there. In the Editor the ←/→ keys also steer.
 - The Android back button pauses; on the title screen it quits.
 
-Not yet confirmed on a device: how v1.5's hybrid steering feels in the hand.
+Not yet confirmed on a device: how v1.6's rotation-speed steering feels in the hand.
+
+**Performance:** the game renders at 75% of native resolution with 2x MSAA (`GameRoot.RenderScale`). At full resolution with 4x MSAA plus the bloom chain, a Galaxy A71 ran at ~41 fps; now it holds a steady 60 (measured with `dumpsys SurfaceFlinger --latency`).
 
 ## Releases
 

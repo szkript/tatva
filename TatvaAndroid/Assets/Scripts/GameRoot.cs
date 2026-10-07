@@ -26,7 +26,8 @@ namespace Tatva
         {
             Application.targetFrameRate = 60;
             QualitySettings.vSyncCount = 0;
-            QualitySettings.antiAliasing = 4;
+            QualitySettings.antiAliasing = 2;
+            ScaleRendering();
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
             AllowRotation();
             Input.multiTouchEnabled = false;
@@ -75,6 +76,24 @@ namespace Tatva
             hud.ControlCycle += CycleControl;
             hud.SensCycle += CycleGain;
             hud.ShowTitle(best, steering.Mode, steering.Gain, Steering.HasGyro);
+        }
+
+        // Full-res MSAA + the bloom chain ran at ~41 fps on a Galaxy A71 (2400x1080); render below native and let the
+        // compositor upscale. resScale keeps line widths (sized from the physical dpi) the same on screen.
+        const float RenderScale = 0.75f;
+        float resScale = 1f;
+
+        void ScaleRendering()
+        {
+            if (!Application.isMobilePlatform) return;
+            int nw = Display.main.systemWidth, nh = Display.main.systemHeight;
+            if (nw <= 0 || nh <= 0) return;
+            bool land = Screen.width > Screen.height;
+            int longSide = Mathf.Max(nw, nh), shortSide = Mathf.Min(nw, nh);
+            int w = Mathf.RoundToInt((land ? longSide : shortSide) * RenderScale);
+            int h = Mathf.RoundToInt((land ? shortSide : longSide) * RenderScale);
+            Screen.SetResolution(w, h, FullScreenMode.FullScreenWindow);
+            resScale = RenderScale;
         }
 
         void Wire()
@@ -197,7 +216,7 @@ namespace Tatva
             float dtR = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
             float w = Screen.width, h = Screen.height;
             cam.orthographicSize = h / 2f;
-            float dp = Mathf.Clamp(Screen.dpi > 0 ? Screen.dpi / 160f : h / 800f, 1f, 4f);
+            float dp = Mathf.Clamp(Screen.dpi > 0 ? Screen.dpi / 160f * resScale : h / 800f, 1f, 4f);
             view.Resize(w, h, dp);
 
             // Android back button

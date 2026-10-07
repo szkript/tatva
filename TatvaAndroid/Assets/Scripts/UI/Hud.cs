@@ -188,7 +188,7 @@ namespace Tatva
             hint.text = control == Control.Touch
                 ? "Érintsd meg a kör bármely pontját, a hajó odafordul.\nSúrold a falakat a hajszál-bónuszért, gyűjtsd a fénygömböket."
                 : hasGyro
-                    ? "Döntsd a telefont, mint egy kormányt. Kis döntés:\nkis, pontos mozdulat. Nagyobb döntés: a hajó körbe\nfordul, annál gyorsabban, minél jobban döntöd."
+                    ? "Forgasd a telefont, mint egy kormányt. A hajó csak\nforgatás közben mozog: lassú forgatás alig mozdítja,\ngyors rántás messzire viszi. Ha megállsz, megáll."
                     : "Ezen az eszközön nincs giroszkóp, az érintéses irányítás működik.";
         }
 

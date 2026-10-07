@@ -5,9 +5,8 @@ namespace Tatva
     public enum Control { Gyro, GyroInverted, Touch }
 
     /// <summary>
-    /// Turns the phone into a steering wheel. A light tilt moves the ship directly and precisely
-    /// (small rotation = small move); a bigger tilt makes it keep circling, faster the more the
-    /// phone is tilted, so the phone never has to turn more than a quarter turn.
+    /// Turns the phone into a steering wheel driven by rotation speed: the ship moves only while
+    /// the phone is turning, and a swifter turn moves it disproportionately further.
     ///
     /// Sensor fusion (complementary filter): the gyroscope's rotation rate around the screen
     /// normal is integrated every frame (fast, smooth, works with the phone lying flat), and the
@@ -70,8 +69,8 @@ namespace Tatva
 
             if (Mode != Control.Touch && HasGyro)
             {
-                float tilt = ReadGyro(dt);
-                return new SteerCmd { HasTunnelTarget = true, Target = mapper.Step(tilt, Gain, dt, theta) };
+                float rate = ReadGyro(dt);
+                return new SteerCmd { HasTunnelTarget = true, Target = mapper.Step(rate, Gain, dt, theta) };
             }
 
             Vector2? p = null;
@@ -85,56 +84,47 @@ namespace Tatva
             return hasTouch ? new SteerCmd { HasTarget = true, Target = touchAngle } : default;
         }
 
-        // ---------- hybrid tilt mapping ----------
-        // Up to DirectZone the tilt moves the ship directly (position control: tilt a little, the ship
-        // moves a little and stops). Past it the ship keeps circling, faster the more the phone is tilted
-        // (rate control). At the boundary the direct offset is at its maximum and the rate starts at zero,
-        // so the two blend without a jump.
+        // ---------- rotation-speed mapping (v1.6) ----------
+        // Only the phone's rotation SPEED moves the ship, never its angle: stop rotating and the ship stops,
+        // wherever the phone is. The response is superlinear like mouse acceleration: a swift turn throws the
+        // ship far (dodging), a slow turn barely moves it, so the phone can be eased back to level without
+        // losing the ship's position.
 
-        public const float DirectZone = 10f * Mathf.Deg2Rad;
-        public const float GyroMaxRate = Sim.MaxRate;
-        /// <summary>Ship degrees per phone degree inside the direct zone.</summary>
-        public static float DirectGain(float gain) => 2f * gain;
-        /// <summary>Tilt at which circling reaches full speed: 10 + 25/sensitivity degrees.</summary>
-        public static float FullTilt(float gain) => DirectZone + 25f * Mathf.Deg2Rad / Mathf.Max(0.5f, gain);
+        /// <summary>Rotation speed treated as stillness (gyro noise, hand tremor), rad/s.</summary>
+        public const float NoiseRate = 0.05f;
+        /// <summary>How far the target may run ahead of the ship before the excess is dropped, radians.</summary>
+        public const float LeadLimit = 1.6f;
 
-        /// <summary>Circling speed for a tilt (radians from level, signed); zero inside the direct zone.</summary>
-        public static float TiltToRate(float tilt, float gain)
+        /// <summary>Ship angular speed (rad/s) for a phone rotation speed (rad/s, signed): k·gain·r², minus the noise floor.</summary>
+        public static float RateToShip(float rate, float gain)
         {
-            float a = Mathf.Abs(tilt);
-            if (a <= DirectZone) return 0f;
-            float u = Mathf.Clamp01((a - DirectZone) / (FullTilt(gain) - DirectZone));
-            return Mathf.Sign(tilt) * GyroMaxRate * Mathf.Pow(u, 1.5f);
+            float a = Mathf.Max(0f, Mathf.Abs(rate) - NoiseRate);
+            return Mathf.Sign(rate) * 3.5f * gain * a * a;
         }
 
-        /// <summary>Turns tilt into a target angle in tunnel space. Plain C# so the self-test can drive it.</summary>
-        public sealed class TiltMapper
+        /// <summary>Turns phone rotation speed into a target angle in tunnel space. Plain C# so the self-test can drive it.</summary>
+        public sealed class RotationMapper
         {
-            float anchor;
+            float target;
             bool init;
             public void Reset() => init = false;
 
-            public float Step(float tilt, float gain, float dt, float theta)
+            public float Step(float rate, float gain, float dt, float theta)
             {
-                float direct = DirectGain(gain) * Mathf.Clamp(tilt, -DirectZone, DirectZone);
-                if (!init) { anchor = Sim.Mod(theta - direct); init = true; }
-                anchor = Sim.Mod(anchor + TiltToRate(tilt, gain) * dt);
-                float target = Sim.Mod(anchor + direct);
-                // anti-windup: never let the target run more than ~70 degrees ahead of the ship
+                if (!init) { target = theta; init = true; }
+                target = Sim.Mod(target + RateToShip(rate, gain) * dt);
                 float lead = Sim.AngDiff(target, theta);
-                if (Mathf.Abs(lead) > 1.2f)
-                {
-                    float fix = lead - Mathf.Sign(lead) * 1.2f;
-                    anchor = Sim.Mod(anchor - fix);
-                    target = Sim.Mod(target - fix);
-                }
+                if (Mathf.Abs(lead) > LeadLimit) target = Sim.Mod(theta + Mathf.Sign(lead) * LeadLimit);
                 return target;
             }
         }
 
-        readonly TiltMapper mapper = new TiltMapper();
+        readonly RotationMapper mapper = new RotationMapper();
 
-        /// <summary>Signed tilt of the phone away from level, radians.</summary>
+        /// <summary>
+        /// Signed rotation speed of the phone about the screen normal, rad/s. The tilt estimate is kept up to date
+        /// too, because learning the gyro axis sign compares the gyro against gravity.
+        /// </summary>
         float ReadGyro(float dt)
         {
             Vector3 g = Input.gyro.gravity;
@@ -174,7 +164,7 @@ namespace Tatva
             // gentle pull: the gyro carries fast motion, gravity (slower, filtered by the OS) only removes drift
             est = Sim.Mod(est + Sim.AngDiff(meas, est) * Mathf.Min(1f, dt * 2.5f * w));
 
-            return Sim.AngDiff(est, Sim.Bottom) * (Mode == Control.GyroInverted ? -1 : 1);
+            return rate * (Mode == Control.GyroInverted ? -1 : 1);
         }
     }
 

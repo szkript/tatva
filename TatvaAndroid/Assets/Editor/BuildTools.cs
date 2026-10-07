@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "1.5";
-        PlayerSettings.Android.bundleVersionCode = 6;
+        PlayerSettings.bundleVersion = "1.6";
+        PlayerSettings.Android.bundleVersionCode = 7;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
@@ -356,68 +356,60 @@ public static class BuildTools
     }
 
     /// <summary>
-    /// Hybrid gyro steering, driven closed-loop through TiltMapper and Sim:
-    /// a light tilt gives a small, immediate move that holds; levelling brings the ship back;
-    /// a big tilt keeps the ship circling fast; the rate curve is zero in the direct zone,
-    /// monotonic, symmetric and saturates.
+    /// Rotation-speed gyro steering, driven closed-loop through RotationMapper and Sim:
+    /// the ship stops when the phone stops; the same phone turn moves the ship further when it is
+    /// swifter; a slow turn back undoes only a little of a swift dodge; noise does nothing.
     /// </summary>
     static void TestTilt(List<string> errors)
     {
-        foreach (float gain in new[] { 0.85f, 1.25f, 2f })
+        const float G = 1.25f, dt = 1f / 60f;
+        if (Steering.RateToShip(Steering.NoiseRate * 0.9f, G) != 0) errors.Add("gyro noise moves the ship");
+        float prev = 0;
+        for (int i = 1; i <= 100; i++)
         {
-            if (Steering.TiltToRate(Steering.DirectZone * 0.95f, gain) != 0) errors.Add("rate leaks into the direct zone at gain " + gain);
-            float prev = 0;
-            for (int d = 1; d <= 90; d++)
-            {
-                float r = Steering.TiltToRate(d * Mathf.Deg2Rad, gain);
-                if (r < prev - 1e-5f) errors.Add($"tilt rate not monotonic at {d} deg, gain {gain}");
-                if (Mathf.Abs(r + Steering.TiltToRate(-d * Mathf.Deg2Rad, gain)) > 1e-5f) errors.Add("tilt rate not symmetric");
-                prev = r;
-            }
-            if (Mathf.Abs(Steering.TiltToRate(Steering.FullTilt(gain) + 0.01f, gain) - Steering.GyroMaxRate) > 1e-3f)
-                errors.Add($"tilt does not reach full speed at gain {gain}");
+            float r = Steering.RateToShip(i * 0.05f, G);
+            if (r < prev) errors.Add($"ship speed not monotonic at {i * 0.05f:0.00} rad/s");
+            if (Mathf.Abs(r + Steering.RateToShip(-i * 0.05f, G)) > 1e-5f) errors.Add("rotation mapping not symmetric");
+            prev = r;
         }
 
-        const float G = 1.25f, dt = 1f / 60f;
-        var sim = new Sim(8);
-        sim.Reset(Mode.Play);
-        var map = new Steering.TiltMapper();
+        Sim sim = null;
+        var map = new Steering.RotationMapper();
         float travelled = 0;
-        float Run(float tiltDeg, float seconds)
+        float Run(float rate, float seconds)
         {
             float start = travelled;
             for (int i = 0; i < Mathf.RoundToInt(seconds / dt); i++)
             {
                 float before = sim.Theta;
-                float target = map.Step(tiltDeg * Mathf.Deg2Rad, G, dt, sim.Theta);
-                sim.Update(dt, new SteerCmd { HasTunnelTarget = true, Target = target });
+                sim.Update(dt, new SteerCmd { HasTunnelTarget = true, Target = map.Step(rate, G, dt, sim.Theta) });
                 travelled += Sim.AngDiff(sim.Theta, before);
             }
             return travelled - start;
         }
+        void Fresh(int seed) { sim = new Sim(seed); sim.Reset(Mode.Play); map.Reset(); travelled = 0; Run(0, 0.1f); }
 
-        Run(0, 0.2f);
-        float expect = Steering.DirectGain(G) * 5f * Mathf.Deg2Rad;
-        float quick = Run(5, 0.15f);
-        float small = quick + Run(5, 0.85f);
-        float hold = Run(5, 0.5f);
-        float back = Run(0, 0.6f);
-        if (quick < expect * 0.7f) errors.Add($"light tilt reacts slowly: {quick * Mathf.Rad2Deg:0.0} of {expect * Mathf.Rad2Deg:0.0} deg after 0.15s");
-        if (Mathf.Abs(small - expect) > expect * 0.15f) errors.Add($"light tilt moved {small * Mathf.Rad2Deg:0.0} deg, expected {expect * Mathf.Rad2Deg:0.0}");
-        if (Mathf.Abs(hold) > 0.01f) errors.Add($"light tilt keeps drifting ({hold * Mathf.Rad2Deg:0.0} deg in 0.5s)");
-        if (Mathf.Abs(back + small) > 0.03f) errors.Add($"levelling did not bring the ship back ({(back + small) * Mathf.Rad2Deg:0.0} deg off)");
+        // the same 30 degree phone turn at three speeds, then let the ship settle
+        float Turn(float rate) { Run(rate, 30f * Mathf.Deg2Rad / rate); return Run(0, 0.6f); }
+        Fresh(8); Turn(0.3f); float slow = travelled;
+        float still = Run(0, 0.5f);
+        Fresh(9); Turn(1f); float medium = travelled;
+        Fresh(10); Turn(3f); float fast = travelled;
+        if (Mathf.Abs(still) > 0.005f) errors.Add($"ship keeps moving after the phone stopped ({still * Mathf.Rad2Deg:0.0} deg in 0.5s)");
+        if (!(medium > slow * 2f && fast > medium * 1.5f && fast > 2.5f))
+            errors.Add($"swifter turn does not move further: 30deg at 0.3/1/3 rad/s -> {slow * Mathf.Rad2Deg:0}/{medium * Mathf.Rad2Deg:0}/{fast * Mathf.Rad2Deg:0} deg");
 
-        var sim2 = new Sim(9); sim2.Reset(Mode.Play); sim = sim2; map.Reset();
-        Run(0, 0.1f);
-        float medium = Run(18, 1f);
-        var sim3 = new Sim(10); sim3.Reset(Mode.Play); sim = sim3; map.Reset();
-        Run(0, 0.1f);
-        float big = Run(35, 1f);
-        if (!(medium > small * 2 && big > medium * 1.5f && big > 6f))
-            errors.Add($"bigger tilt is not faster: 5deg {small:0.00}, 18deg {medium:0.00}, 35deg {big:0.00} rad in 1s");
+        // swift dodge, then ease the phone back slowly: the ship should keep most of the dodge
+        Fresh(11); Turn(3f); float dodge = travelled;
+        Run(-0.25f, 30f * Mathf.Deg2Rad / 0.25f); Run(0, 0.6f);
+        float kept = travelled / dodge;
+        if (kept < 0.75f) errors.Add($"slow return undid too much of a dodge: kept {kept * 100:0}%");
 
-        Debug.Log($"[SelfTest] tilt (1.25x): 5deg -> {small * Mathf.Rad2Deg:0} deg move ({quick / expect * 100:0}% within 0.15s, holds, returns); " +
-                  $"18deg -> {medium:0.0} rad/s; 35deg -> {big:0.0} rad/s.");
+        Fresh(12); Run(0.04f, 2f); Run(-0.04f, 2f);
+        if (Mathf.Abs(travelled) > 0.001f) errors.Add($"steady slow drift moved the ship {travelled * Mathf.Rad2Deg:0.0} deg");
+
+        Debug.Log($"[SelfTest] rotation steering (1.25x): 30deg phone turn at 0.3/1/3 rad/s -> {slow * Mathf.Rad2Deg:0}/{medium * Mathf.Rad2Deg:0}/{fast * Mathf.Rad2Deg:0} deg ship; " +
+                  $"stops when the phone stops; slow return keeps {kept * 100:0}% of a dodge.");
     }
 
     // ---------- build ----------
