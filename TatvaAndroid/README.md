@@ -20,6 +20,8 @@ Landscape only (manifest `userLandscape`). The menus flip between the two landsc
 
 Not yet confirmed on a device: how v1.6's rotation-speed steering feels in the hand.
 
+**Steering telemetry (v1.7):** every run writes a per-frame CSV (`SteerLog`) to `/sdcard/Android/data/com.kkodelab.tatva/files/steerlogs/` (newest 40 kept). Each frame records raw gyro xyz, gravity, axis sign, rate used, ship command, target, ship angle and speed, lead clamp, the error to the nearest free gap (`gap`, from `Sim.AiTarget`) and the time to the next wall. Deaths record the walls alongside the ship. With the phone plugged in, run `python Tools/steer_report.py` (`--all` reports every run). It pulls the logs into `../logs/steerlogs` and reports the axis share, noise and bias, the ship/phone ratio by turn speed, stop delay and coasting, corrections, time at the speed limit, and a classified cause for each death (no input / wrong way / overshoot / too slow / late) with a timeline of the last 1.2 s.
+
 **Performance:** the game renders at 75% of native resolution with 2x MSAA (`GameRoot.RenderScale`). At full resolution with 4x MSAA plus the bloom chain, a Galaxy A71 ran at ~41 fps; now it holds a steady 60 (measured with `dumpsys SurfaceFlinger --latency`).
 
 ## Releases

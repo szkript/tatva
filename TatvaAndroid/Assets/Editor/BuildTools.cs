@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "1.6";
-        PlayerSettings.Android.bundleVersionCode = 7;
+        PlayerSettings.bundleVersion = "1.7";
+        PlayerSettings.Android.bundleVersionCode = 8;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;

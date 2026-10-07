@@ -18,6 +18,7 @@ namespace Tatva
         Sim sim;
         Steering steering;
         Hud hud;
+        readonly SteerLog log = new SteerLog();
         bool paused, music, overShown;
         int best, hudScore = -1, hudMult = -1;
         float lastCut = -1;
@@ -108,6 +109,7 @@ namespace Tatva
                 Music.Graze(audioHost.Synth, audioHost.At);
                 hud.Float($"Hajszál! +{Hud.Fmt(pts)}", view.ShipPos * 0.82f, Painter.Hsl(sim.Hue + 40, 100, 75, 1, false), 64);
                 Haptics.Pulse(18, 120);
+                log.Event("graze", "pts=" + pts);
             };
             sim.OrbTaken += (pts, streak) =>
             {
@@ -115,6 +117,7 @@ namespace Tatva
                 Music.Orb(audioHost.Synth, audioHost.At, streak - 1);
                 hud.Float($"+{Hud.Fmt(pts)}", view.ShipPos * 0.82f, Painter.Hsl(sim.Hue + 150, 100, 75, 1, false), 48);
                 Haptics.Pulse(8, 70);
+                log.Event("orb", "streak=" + streak);
             };
             sim.ZoneChanged += z =>
             {
@@ -126,6 +129,7 @@ namespace Tatva
             };
             sim.Died += () =>
             {
+                log.Death(sim);
                 music = false;
                 view.OnDeath(sim);
                 Music.Death(audioHost.Synth, audioHost.At);
@@ -139,6 +143,7 @@ namespace Tatva
             view.ResetDust(0);
             LockRotation();
             steering.Recenter();
+            log.Begin(steering, sim);
             paused = false; overShown = false; music = true;
             audioHost.Synth.SetMuted(false);
             hudScore = hudMult = -1;
@@ -152,6 +157,7 @@ namespace Tatva
         void ToTitle()
         {
             paused = false; music = false; overShown = false;
+            log.End();
             AllowRotation();
             audioHost.Synth.SetMuted(false);
             sim.Reset(Mode.Title);
@@ -185,6 +191,7 @@ namespace Tatva
         {
             if (sim.Mode != Mode.Play || paused == p) return;
             paused = p;
+            log.Event(p ? "pause" : "resume");
             hud.ShowPause(p);
             audioHost.Synth.SetMuted(p);
         }
@@ -208,7 +215,7 @@ namespace Tatva
             Music.Click(audioHost.Synth, audioHost.At);
         }
 
-        void OnApplicationPause(bool p) { if (p) SetPaused(true); }
+        void OnApplicationPause(bool p) { if (p) { SetPaused(true); log.Flush(); } }
         void OnApplicationFocus(bool f) { if (!f) SetPaused(true); }
 
         void Update()
@@ -235,6 +242,7 @@ namespace Tatva
             if (!paused)
             {
                 sim.Update(dtR, cmd);
+                log.Frame(dtR, steering, sim, cmd);
                 view.Tick(sim, dtR);
             }
 

@@ -25,6 +25,13 @@ namespace Tatva
 
         public static bool HasGyro => SystemInfo.supportsGyroscope;
 
+        // last frame's sensor and mapping values, read by SteerLog
+        public Vector3 LastRaw, LastUnbiased, LastGravity;
+        public float LastRate, LastShip;
+        public bool LastClamped;
+        public int SignFlips;
+        public float GyroSign => gyroSign;
+
         public void Enable()
         {
             if (!HasGyro) return;
@@ -70,7 +77,9 @@ namespace Tatva
             if (Mode != Control.Touch && HasGyro)
             {
                 float rate = ReadGyro(dt);
-                return new SteerCmd { HasTunnelTarget = true, Target = mapper.Step(rate, Gain, dt, theta) };
+                float target = mapper.Step(rate, Gain, dt, theta);
+                LastRate = rate; LastShip = RateToShip(rate, Gain); LastClamped = mapper.Clamped;
+                return new SteerCmd { HasTunnelTarget = true, Target = target };
             }
 
             Vector2? p = null;
@@ -107,6 +116,7 @@ namespace Tatva
         {
             float target;
             bool init;
+            public bool Clamped;
             public void Reset() => init = false;
 
             public float Step(float rate, float gain, float dt, float theta)
@@ -114,7 +124,8 @@ namespace Tatva
                 if (!init) { target = theta; init = true; }
                 target = Sim.Mod(target + RateToShip(rate, gain) * dt);
                 float lead = Sim.AngDiff(target, theta);
-                if (Mathf.Abs(lead) > LeadLimit) target = Sim.Mod(theta + Mathf.Sign(lead) * LeadLimit);
+                Clamped = Mathf.Abs(lead) > LeadLimit;
+                if (Clamped) target = Sim.Mod(theta + Mathf.Sign(lead) * LeadLimit);
                 return target;
             }
         }
@@ -131,6 +142,7 @@ namespace Tatva
             float mag = new Vector2(g.x, g.y).magnitude;
             float meas = Sim.Mod(Mathf.Atan2(g.y, g.x) + ScreenOffset() + snap);
             float rate = -Input.gyro.rotationRateUnbiased.z * gyroSign;
+            LastRaw = Input.gyro.rotationRate; LastUnbiased = Input.gyro.rotationRateUnbiased; LastGravity = g;
 
             if (!init)
             {
@@ -154,7 +166,7 @@ namespace Tatva
                 if (Mathf.Abs(dm) > 0.003f && Mathf.Abs(dg) > 0.003f)
                 {
                     signVotes = Mathf.Clamp(signVotes + Mathf.Sign(dm * dg), -30, 30);
-                    if (signVotes < -5) { gyroSign = -gyroSign; signVotes = 0; }
+                    if (signVotes < -5) { gyroSign = -gyroSign; signVotes = 0; SignFlips++; }
                 }
             }
             lastMeas = meas; haveLast = mag > 0.5f;
