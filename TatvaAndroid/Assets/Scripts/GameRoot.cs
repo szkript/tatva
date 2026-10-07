@@ -28,7 +28,7 @@ namespace Tatva
             QualitySettings.vSyncCount = 0;
             QualitySettings.antiAliasing = 4;
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
-            Screen.orientation = ScreenOrientation.Portrait;
+            AllowRotation();
             Input.multiTouchEnabled = false;
 
             best = PlayerPrefs.GetInt(BestKey, 0);
@@ -118,6 +118,7 @@ namespace Tatva
         {
             sim.Reset(Mode.Play);
             view.ResetDust(0);
+            LockRotation();
             steering.Recenter();
             paused = false; overShown = false; music = true;
             audioHost.Synth.SetMuted(false);
@@ -132,10 +133,35 @@ namespace Tatva
         void ToTitle()
         {
             paused = false; music = false; overShown = false;
+            AllowRotation();
             audioHost.Synth.SetMuted(false);
             sim.Reset(Mode.Title);
             view.ResetDust(0);
             hud.ShowTitle(best, steering.Mode, steering.Gain, Steering.HasGyro);
+        }
+
+        // Menus follow the phone; a run locks the orientation it started in, so steering by
+        // turning the phone cannot flip the screen mid-game.
+        static void AllowRotation()
+        {
+            Screen.autorotateToPortrait = true;
+            Screen.autorotateToLandscapeLeft = true;
+            Screen.autorotateToLandscapeRight = true;
+            Screen.autorotateToPortraitUpsideDown = false;
+            Screen.orientation = ScreenOrientation.AutoRotation;
+        }
+
+        static void LockRotation()
+        {
+            var o = Screen.orientation;
+            if (o == ScreenOrientation.AutoRotation)
+            {
+                var d = Input.deviceOrientation;
+                o = Screen.width > Screen.height
+                    ? (d == DeviceOrientation.LandscapeRight ? ScreenOrientation.LandscapeRight : ScreenOrientation.LandscapeLeft)
+                    : ScreenOrientation.Portrait;
+            }
+            Screen.orientation = o;
         }
 
         void SetPaused(bool p)

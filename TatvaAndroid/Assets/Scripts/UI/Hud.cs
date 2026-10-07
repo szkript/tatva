@@ -16,9 +16,18 @@ namespace Tatva
         public static string Fmt(int n) => n.ToString("N0", Hu);
 
         static readonly Color Ink = new Color(0.957f, 0.941f, 1f), Mist = new Color(0.604f, 0.573f, 0.722f);
+        static readonly Color Neon = new Color(1f, 0.239f, 0.604f);
         static readonly Color Gold = new Color(1f, 0.824f, 0.369f), Ice = new Color(0.247f, 0.941f, 1f), Void = new Color(0.024f, 0.016f, 0.047f);
 
         readonly Canvas canvas;
+        readonly CanvasScaler scaler;
+        // portrait layout is the one built below; landscape positions are registered with Dual()
+        readonly List<(RectTransform rt, Vector2 aP, Vector2 pP, Vector2 sP, Vector2 aL, Vector2 pL, Vector2 sL)> placements =
+            new List<(RectTransform, Vector2, Vector2, Vector2, Vector2, Vector2, Vector2)>();
+        bool landscape;
+        /// <summary>Follow the screen aspect in Tick (off for offscreen snapshots).</summary>
+        public bool AutoOrient = true;
+        public Canvas Canvas => canvas;
         readonly RectTransform safe;
         readonly Font font;
         readonly Sprite pill;
@@ -40,7 +49,7 @@ namespace Tatva
             go.transform.SetParent(parent, false);
             canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scaler = go.GetComponent<CanvasScaler>();
+            scaler = go.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1080, 1920);
             scaler.matchWidthOrHeight = 0.5f;
@@ -78,30 +87,43 @@ namespace Tatva
             Dim(titleRoot, 0.55f);
             title = Label(titleRoot, "TÁTVA", 250, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.72f), Vector2.zero, new Vector2(1080, 300), FontStyle.Bold);
             Glow(title, new Color(1f, 0.24f, 0.6f, 0.6f));
+            Dual(title, new Vector2(0.3f, 0.62f), Vector2.zero);
             tagline = Label(titleRoot, "A L A G Ú T F U T A M   A   R I T M U S R A", 26, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.72f), new Vector2(0, -170), new Vector2(1000, 40));
+            Dual(tagline, new Vector2(0.3f, 0.62f), new Vector2(0, -170), new Vector2(900, 40));
             var startBtn = MakeButton(titleRoot, "INDÍTÁS", new Vector2(0.5f, 0.5f), new Vector2(0, 40), new Vector2(560, 150), 56, true);
             startBtn.onClick.AddListener(() => Start?.Invoke());
+            Dual(startBtn, new Vector2(0.74f, 0.5f), new Vector2(0, 220));
             controlBtn = MakeButton(titleRoot, "", new Vector2(0.5f, 0.5f), new Vector2(0, -130), new Vector2(760, 110), 36, false);
             controlLabel = controlBtn.GetComponentInChildren<Text>();
             controlBtn.onClick.AddListener(() => ControlCycle?.Invoke());
+            Dual(controlBtn, new Vector2(0.74f, 0.5f), new Vector2(0, 60));
             sensBtn = MakeButton(titleRoot, "", new Vector2(0.5f, 0.5f), new Vector2(0, -260), new Vector2(760, 110), 36, false);
             sensLabel = sensBtn.GetComponentInChildren<Text>();
             sensBtn.onClick.AddListener(() => SensCycle?.Invoke());
+            Dual(sensBtn, new Vector2(0.74f, 0.5f), new Vector2(0, -60));
             hint = Label(titleRoot, "", 32, Mist, TextAnchor.UpperCenter, new Vector2(0.5f, 0.5f), new Vector2(0, -360), new Vector2(940, 260));
+            Dual(hint, new Vector2(0.74f, 0.5f), new Vector2(0, -135), new Vector2(800, 300));
             titleBest = Label(titleRoot, "", 32, Gold, TextAnchor.MiddleCenter, new Vector2(0.5f, 0), new Vector2(0, 90), new Vector2(900, 50));
+            Dual(titleBest, new Vector2(0.3f, 0.62f), new Vector2(0, -250));
 
             // ---- game over ----
             overRoot = Group("Over");
             Dim(overRoot, 0.6f);
             overZone = Label(overRoot, "", 30, Ice, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.68f), new Vector2(0, 80), new Vector2(1000, 50));
+            Dual(overZone, new Vector2(0.32f, 0.5f), new Vector2(0, 250));
             overTitle = Label(overRoot, "", 120, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.68f), new Vector2(0, -40), new Vector2(1060, 160), FontStyle.Bold);
+            Dual(overTitle, new Vector2(0.32f, 0.5f), new Vector2(0, 140));
             overScore = Label(overRoot, "", 130, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.68f), new Vector2(0, -210), new Vector2(1000, 170), FontStyle.Bold);
             Glow(overScore, new Color(1f, 0.24f, 0.6f, 0.55f));
+            Dual(overScore, new Vector2(0.32f, 0.5f), new Vector2(0, -30));
             overStats = Label(overRoot, "", 34, Mist, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.68f), new Vector2(0, -350), new Vector2(1000, 110));
+            Dual(overStats, new Vector2(0.32f, 0.5f), new Vector2(0, -190));
             var againBtn = MakeButton(overRoot, "ÚJRA", new Vector2(0.5f, 0.3f), new Vector2(0, 60), new Vector2(560, 150), 56, true);
             againBtn.onClick.AddListener(() => Again?.Invoke());
+            Dual(againBtn, new Vector2(0.76f, 0.5f), new Vector2(0, 70));
             var menuBtn = MakeButton(overRoot, "MENÜ", new Vector2(0.5f, 0.3f), new Vector2(0, -110), new Vector2(400, 110), 36, false);
             menuBtn.onClick.AddListener(() => Menu?.Invoke());
+            Dual(menuBtn, new Vector2(0.76f, 0.5f), new Vector2(0, -100));
 
             // ---- pause ----
             pauseRoot = Group("Pause");
@@ -113,6 +135,27 @@ namespace Tatva
             pMenuBtn.onClick.AddListener(() => Menu?.Invoke());
 
             ShowOnly(titleRoot);
+        }
+
+        // ---------- orientation ----------
+        void Dual(Component c, Vector2 anchorL, Vector2 posL, Vector2? sizeL = null)
+        {
+            var rt = (RectTransform)c.transform;
+            placements.Add((rt, rt.anchorMin, rt.anchoredPosition, rt.sizeDelta, anchorL, posL, sizeL ?? rt.sizeDelta));
+        }
+
+        public bool Landscape => landscape;
+
+        public void SetLandscape(bool l)
+        {
+            landscape = l;
+            scaler.referenceResolution = l ? new Vector2(1920, 1080) : new Vector2(1080, 1920);
+            foreach (var p in placements)
+            {
+                p.rt.anchorMin = p.rt.anchorMax = l ? p.aL : p.aP;
+                p.rt.anchoredPosition = l ? p.pL : p.pP;
+                p.rt.sizeDelta = l ? p.sL : p.sP;
+            }
         }
 
         // ---------- screens ----------
@@ -197,6 +240,7 @@ namespace Tatva
         public void Tick(float dt, float hue)
         {
             if (Screen.safeArea != lastSafe) ApplySafeArea();
+            if (AutoOrient && Screen.width > 0 && (Screen.width > Screen.height) != landscape) SetLandscape(Screen.width > Screen.height);
 
             // title colour cycles through the zone palette
             if (titleRoot.activeSelf)
@@ -300,12 +344,12 @@ namespace Tatva
             rt.anchorMin = rt.anchorMax = anchor; rt.anchoredPosition = pos; rt.sizeDelta = size;
             var img = g.GetComponent<Image>();
             img.sprite = pill; img.type = Image.Type.Sliced;
-            img.color = primary ? Ink : new Color(1, 1, 1, 0.1f);
+            img.color = primary ? Neon : new Color(1, 1, 1, 0.1f);
             var btn = g.GetComponent<Button>();
             var cb = btn.colors;
             cb.highlightedColor = Color.white; cb.pressedColor = new Color(0.75f, 0.75f, 0.8f); cb.selectedColor = Color.white; cb.fadeDuration = 0.05f;
             btn.colors = cb;
-            var t = Label(g, label, fontSize, primary ? Void : Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.5f), Vector2.zero, size, FontStyle.Bold);
+            var t = Label(g, label, fontSize, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.5f), Vector2.zero, size, FontStyle.Bold);
             if (primary) { var o = g.AddComponent<Shadow>(); o.effectColor = new Color(Ice.r, Ice.g, Ice.b, 0.6f); o.effectDistance = new Vector2(0, -6); }
             t.raycastTarget = false;
             return btn;

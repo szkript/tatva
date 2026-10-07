@@ -38,14 +38,15 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "1.0";
-        PlayerSettings.Android.bundleVersionCode = 1;
+        PlayerSettings.bundleVersion = "1.1";
+        PlayerSettings.Android.bundleVersionCode = 2;
 
-        PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
+        // portrait and both landscapes; GameRoot locks the orientation while a run is on
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
         PlayerSettings.allowedAutorotateToPortrait = true;
         PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
-        PlayerSettings.allowedAutorotateToLandscapeLeft = false;
-        PlayerSettings.allowedAutorotateToLandscapeRight = false;
+        PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+        PlayerSettings.allowedAutorotateToLandscapeRight = true;
 
         PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
         PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
@@ -268,17 +269,33 @@ public static class BuildTools
         }
     }
 
-    /// <summary>Renders demo frames (with bloom) to Builds/snap_*.png for a visual check. Needs a graphics device.</summary>
+    /// <summary>
+    /// Renders frames with bloom and the UI (canvas switched to screen-space-camera) to Builds/snap_*.png,
+    /// in portrait and landscape, for a visual check. Needs a graphics device (no -nographics).
+    /// </summary>
     public static void Snapshot()
     {
-        const int W = 1080, H = 2400;
+        Directory.CreateDirectory("Builds");
+        Shot(1080, 2400, 60 * 50, "title", "portrait_title");
+        Shot(1080, 2400, 60 * 75, "play", "portrait_play");
+        Shot(2400, 1080, 60 * 50, "title", "landscape_title");
+        Shot(2400, 1080, 60 * 75, "play", "landscape_play");
+        Shot(2400, 1080, 60 * 20, "over", "landscape_over");
+        Debug.Log("[BuildTools] Snapshots written to Builds/.");
+    }
+
+    static void Shot(int W, int H, int frames, string screen, string name)
+    {
         var sim = new Sim(3);
         sim.Reset(Mode.Title);
         var painter = new Painter();
         var view = new TunnelRenderer();
         view.Resize(W, H, 2.6f);
+        var root = new GameObject("SnapRoot");
         var camGo = new GameObject("SnapCam", typeof(Camera));
+        camGo.transform.SetParent(root.transform, false);
         var meshGo = new GameObject("SnapMesh", typeof(MeshFilter), typeof(MeshRenderer));
+        meshGo.transform.SetParent(root.transform, false);
         var rt = new RenderTexture(W, H, 24, RenderTextureFormat.ARGB32);
         var bloomMat = new Material(Resources.Load<Shader>("Shaders/TatvaBloom"));
         try
@@ -288,48 +305,50 @@ public static class BuildTools
             cam.transform.position = new Vector3(0, 0, -10); cam.nearClipPlane = 0.1f; cam.farClipPlane = 100;
             meshGo.GetComponent<MeshFilter>().sharedMesh = painter.Mesh;
             meshGo.GetComponent<MeshRenderer>().sharedMaterial = new Material(Resources.Load<Shader>("Shaders/TatvaPrim"));
-            Directory.CreateDirectory("Builds");
-            int[] shotsAt = { 60 * 8, 60 * 50, 60 * 75 };
-            int shot = 0;
-            for (int f = 0; f <= shotsAt[shotsAt.Length - 1]; f++)
-            {
-                sim.Update(1f / 60f, default);
-                view.Tick(sim, 1f / 60f);
-                if (f != shotsAt[shot]) continue;
-                view.Draw(sim, painter);
-                painter.Upload();
-                cam.backgroundColor = Painter.Hsl(sim.Hue, 45, 3.5f, 1, false);
-                var raw = RenderTexture.GetTemporary(W, H, 24);
-                cam.targetTexture = raw;
-                cam.Render();
-                cam.targetTexture = null;
-                // same chain as BloomEffect
-                var half = RenderTexture.GetTemporary(W / 2, H / 2); var q1 = RenderTexture.GetTemporary(W / 4, H / 4); var q2 = RenderTexture.GetTemporary(W / 4, H / 4);
-                var e1 = RenderTexture.GetTemporary(W / 8, H / 8); var e2 = RenderTexture.GetTemporary(W / 8, H / 8);
-                Graphics.Blit(raw, half, bloomMat, 0); Graphics.Blit(half, q1, bloomMat, 0);
-                bloomMat.SetFloat("_Spread", 1f); Graphics.Blit(q1, q2, bloomMat, 1); Graphics.Blit(q2, q1, bloomMat, 2);
-                Graphics.Blit(q1, e1, bloomMat, 0);
-                bloomMat.SetFloat("_Spread", 1.6f); Graphics.Blit(e1, e2, bloomMat, 1); Graphics.Blit(e2, e1, bloomMat, 2);
-                bloomMat.SetTexture("_Bloom1", q1); bloomMat.SetTexture("_Bloom2", e1);
-                bloomMat.SetFloat("_Int1", 0.9f); bloomMat.SetFloat("_Int2", 0.7f);
-                Graphics.Blit(raw, rt, bloomMat, 3);
-                foreach (var t in new[] { raw, half, q1, q2, e1, e2 }) RenderTexture.ReleaseTemporary(t);
 
-                RenderTexture.active = rt;
-                var tex = new Texture2D(W, H, TextureFormat.RGB24, false);
-                tex.ReadPixels(new Rect(0, 0, W, H), 0, 0); tex.Apply();
-                RenderTexture.active = null;
-                File.WriteAllBytes($"Builds/snap_{shot}_zone{sim.Zone + 1}.png", tex.EncodeToPNG());
-                UnityEngine.Object.DestroyImmediate(tex);
-                shot++;
-                if (shot >= shotsAt.Length) break;
-            }
-            Debug.Log("[BuildTools] Snapshots written to Builds/.");
+            for (int f = 0; f < frames; f++) { sim.Update(1f / 60f, default); view.Tick(sim, 1f / 60f); }
+            view.Draw(sim, painter);
+            painter.Upload();
+            cam.backgroundColor = Painter.Hsl(sim.Hue, 45, 3.5f, 1, false);
+
+            var raw = RenderTexture.GetTemporary(W, H, 24);
+            cam.targetTexture = raw;
+
+            var hud = new Hud(root.transform, Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")) { AutoOrient = false };
+            hud.SetLandscape(W > H);
+            hud.Canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            hud.Canvas.worldCamera = cam;
+            hud.Canvas.planeDistance = 5;
+            if (screen == "title") hud.ShowTitle(48210, Control.Gyro, 1.6f, true);
+            else if (screen == "play") { hud.ShowPlay(48210); hud.SetScore(sim.Dist > 0 ? 12650 : 0); hud.SetMult(4, false); hud.SetZone(sim.Zone); }
+            else { var dead = new Sim(1); dead.Reset(Mode.Play); dead.Score = 31480; dead.Zone = 4; dead.Grazes = 37; dead.Orbs = 12; dead.Beats = 210; hud.ShowOver(dead, 48210, false); }
+            Canvas.ForceUpdateCanvases();
+
+            cam.Render();
+            cam.targetTexture = null;
+            var half = RenderTexture.GetTemporary(W / 2, H / 2); var q1 = RenderTexture.GetTemporary(W / 4, H / 4); var q2 = RenderTexture.GetTemporary(W / 4, H / 4);
+            var e1 = RenderTexture.GetTemporary(W / 8, H / 8); var e2 = RenderTexture.GetTemporary(W / 8, H / 8);
+            Graphics.Blit(raw, half, bloomMat, 0); Graphics.Blit(half, q1, bloomMat, 0);
+            bloomMat.SetFloat("_Spread", 1f); Graphics.Blit(q1, q2, bloomMat, 1); Graphics.Blit(q2, q1, bloomMat, 2);
+            Graphics.Blit(q1, e1, bloomMat, 0);
+            bloomMat.SetFloat("_Spread", 1.6f); Graphics.Blit(e1, e2, bloomMat, 1); Graphics.Blit(e2, e1, bloomMat, 2);
+            bloomMat.SetTexture("_Bloom1", q1); bloomMat.SetTexture("_Bloom2", e1);
+            bloomMat.SetFloat("_Int1", 0.9f); bloomMat.SetFloat("_Int2", 0.7f);
+            Graphics.Blit(raw, rt, bloomMat, 3);
+            foreach (var t in new[] { raw, half, q1, q2, e1, e2 }) RenderTexture.ReleaseTemporary(t);
+
+            RenderTexture.active = rt;
+            var tex = new Texture2D(W, H, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, W, H), 0, 0); tex.Apply();
+            RenderTexture.active = null;
+            File.WriteAllBytes($"Builds/snap_{name}.png", tex.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(tex);
         }
         finally
         {
-            UnityEngine.Object.DestroyImmediate(camGo);
-            UnityEngine.Object.DestroyImmediate(meshGo);
+            UnityEngine.Object.DestroyImmediate(root);
+            var es = UnityEngine.Object.FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>();
+            if (es != null) UnityEngine.Object.DestroyImmediate(es.gameObject);
             UnityEngine.Object.DestroyImmediate(painter.Mesh);
             rt.Release();
         }

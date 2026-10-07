@@ -19,7 +19,7 @@ namespace Tatva
         public Control Mode = Control.Gyro;
         public float Gain = 1.6f;
 
-        float est = Sim.Bottom, lastMeas, gyroSign = 1, signVotes;
+        float est = Sim.Bottom, lastMeas, gyroSign = 1, signVotes, snap;
         bool init, haveLast, hasTouch;
         float touchAngle;
 
@@ -32,7 +32,30 @@ namespace Tatva
             Input.gyro.updateInterval = 1f / 60f;
         }
 
-        public void Recenter() { init = false; hasTouch = false; }
+        public void Recenter() { init = false; hasTouch = false; snap = 0; }
+
+        /// <summary>
+        /// The sensors report in the device's natural (portrait) axes; the game steers in screen axes.
+        /// Rotation about the screen normal is the same in every orientation, only gravity's angle shifts.
+        /// </summary>
+        static float ScreenOffset()
+        {
+            var o = Screen.orientation;
+            if (o == ScreenOrientation.AutoRotation)
+            {
+                var d = Input.deviceOrientation;
+                o = d == DeviceOrientation.LandscapeLeft ? ScreenOrientation.LandscapeLeft
+                  : d == DeviceOrientation.LandscapeRight ? ScreenOrientation.LandscapeRight
+                  : Screen.width > Screen.height ? ScreenOrientation.LandscapeLeft : ScreenOrientation.Portrait;
+            }
+            switch (o)
+            {
+                case ScreenOrientation.LandscapeLeft: return Mathf.PI / 2f;
+                case ScreenOrientation.LandscapeRight: return -Mathf.PI / 2f;
+                case ScreenOrientation.PortraitUpsideDown: return Mathf.PI;
+                default: return 0f;
+            }
+        }
 
         /// <summary>Current steering angle for UI feedback (title-screen indicator).</summary>
         public float Estimate => est;
@@ -65,10 +88,22 @@ namespace Tatva
         {
             Vector3 g = Input.gyro.gravity;
             float mag = new Vector2(g.x, g.y).magnitude;
-            float meas = Mathf.Atan2(g.y, g.x);
+            float meas = Sim.Mod(Mathf.Atan2(g.y, g.x) + ScreenOffset() + snap);
             float rate = -Input.gyro.rotationRateUnbiased.z * gyroSign;
 
-            if (!init) { est = mag > 0.2f ? meas : Sim.Bottom; init = true; }
+            if (!init)
+            {
+                // At the start of a run the phone is held the way the player looks at it, so "down" should
+                // be near the bottom of the screen. If it is a clean quarter turn off, this device reports
+                // its axes differently: snap by that quarter turn instead of trusting the convention.
+                if (mag > 0.6f)
+                {
+                    float d = Sim.AngDiff(Sim.Bottom, meas), k = Mathf.Round(d / (Mathf.PI / 2f));
+                    if (k != 0 && Mathf.Abs(d - k * Mathf.PI / 2f) < 0.45f) { snap = k * Mathf.PI / 2f; meas = Sim.Mod(meas + snap); }
+                }
+                est = mag > 0.2f ? meas : Sim.Bottom;
+                init = true;
+            }
             est = Sim.Mod(est + rate * dt);
 
             // learn the gyro axis sign from gravity while the phone is upright enough
