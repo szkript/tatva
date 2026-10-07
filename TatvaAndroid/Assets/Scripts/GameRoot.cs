@@ -140,11 +140,11 @@ namespace Tatva
             hud.ShowTitle(best, steering.Mode, steering.Gain, Steering.HasGyro);
         }
 
-        // Menus follow the phone; a run locks the orientation it started in, so steering by
-        // turning the phone cannot flip the screen mid-game.
+        // Landscape only. Menus follow the phone between the two landscape sides; a run locks the
+        // side it started on, so steering by turning the phone cannot flip the screen mid-game.
         static void AllowRotation()
         {
-            Screen.autorotateToPortrait = true;
+            Screen.autorotateToPortrait = false;
             Screen.autorotateToLandscapeLeft = true;
             Screen.autorotateToLandscapeRight = true;
             Screen.autorotateToPortraitUpsideDown = false;
@@ -157,9 +157,7 @@ namespace Tatva
             if (o == ScreenOrientation.AutoRotation)
             {
                 var d = Input.deviceOrientation;
-                o = Screen.width > Screen.height
-                    ? (d == DeviceOrientation.LandscapeRight ? ScreenOrientation.LandscapeRight : ScreenOrientation.LandscapeLeft)
-                    : ScreenOrientation.Portrait;
+                o = d == DeviceOrientation.LandscapeRight ? ScreenOrientation.LandscapeRight : ScreenOrientation.LandscapeLeft;
             }
             Screen.orientation = o;
         }
