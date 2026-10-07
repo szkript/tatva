@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "1.2";
-        PlayerSettings.Android.bundleVersionCode = 3;
+        PlayerSettings.bundleVersion = "1.3";
+        PlayerSettings.Android.bundleVersionCode = 4;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
@@ -122,6 +122,7 @@ public static class BuildTools
         try { TestSynth(errors); } catch (Exception e) { errors.Add("synth threw: " + e); }
         try { TestRender(errors); } catch (Exception e) { errors.Add("render threw: " + e); }
         try { TestHud(errors); } catch (Exception e) { errors.Add("hud threw: " + e); }
+        try { TestTilt(errors); } catch (Exception e) { errors.Add("tilt threw: " + e); }
         if (errors.Count > 0)
         {
             foreach (var e in errors) Debug.LogError("[BuildTools] " + e);
@@ -352,6 +353,32 @@ public static class BuildTools
             UnityEngine.Object.DestroyImmediate(painter.Mesh);
             rt.Release();
         }
+    }
+
+    /// <summary>Gyro speed steering: dead zone, monotonic, symmetric, saturates, and the sim follows the rate.</summary>
+    static void TestTilt(List<string> errors)
+    {
+        foreach (float gain in new[] { 1f, 1.6f, 2.5f })
+        {
+            if (Steering.TiltToRate(Steering.DeadZone * 0.9f, gain) != 0) errors.Add("tilt dead zone leaks at gain " + gain);
+            float prev = 0;
+            for (int d = 5; d <= 90; d++)
+            {
+                float r = Steering.TiltToRate(d * Mathf.Deg2Rad, gain);
+                if (r < prev - 1e-5f) errors.Add($"tilt rate not monotonic at {d} deg, gain {gain}");
+                if (Mathf.Abs(r + Steering.TiltToRate(-d * Mathf.Deg2Rad, gain)) > 1e-5f) errors.Add("tilt rate not symmetric");
+                prev = r;
+            }
+            float full = Steering.TiltToRate(Steering.FullTilt(gain) + 0.01f, gain);
+            if (Mathf.Abs(full - Sim.MaxRate) > 1e-3f) errors.Add($"tilt does not reach full speed at gain {gain}");
+        }
+        var sim = new Sim(8);
+        sim.Reset(Mode.Play);
+        float t0 = sim.Theta;
+        for (int i = 0; i < 30; i++) sim.Update(1f / 60f, new SteerCmd { HasRate = true, Rate = 3f });
+        float moved = Sim.AngDiff(sim.Theta, t0);
+        if (moved < 0.8f || moved > 1.6f) errors.Add($"sim did not follow a 3 rad/s rate for 0.5s (moved {moved:0.00} rad)");
+        Debug.Log($"[SelfTest] tilt: full speed at {Steering.FullTilt(1.6f) * Mathf.Rad2Deg:0} deg (1.6x), sim followed rate ({moved:0.00} rad in 0.5s).");
     }
 
     // ---------- build ----------

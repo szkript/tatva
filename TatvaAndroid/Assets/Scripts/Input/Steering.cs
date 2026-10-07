@@ -5,8 +5,9 @@ namespace Tatva
     public enum Control { Gyro, GyroInverted, Touch }
 
     /// <summary>
-    /// Turns the phone into a steering wheel. The ship slides toward the real-world "down",
-    /// like a marble: rotate the phone clockwise and the ship rolls along the tunnel wall.
+    /// Turns the phone into a steering wheel with speed control: the tilt away from level sets how
+    /// fast the ship circles the tunnel (small tilt = slow, more tilt = faster, level = it stays put),
+    /// so the phone never has to turn more than a quarter turn.
     ///
     /// Sensor fusion (complementary filter): the gyroscope's rotation rate around the screen
     /// normal is integrated every frame (fast, smooth, works with the phone lying flat), and the
@@ -69,8 +70,8 @@ namespace Tatva
 
             if (Mode != Control.Touch && HasGyro)
             {
-                float target = ReadGyro(dt);
-                return new SteerCmd { HasTarget = true, Target = target };
+                float tilt = ReadGyro(dt);
+                return new SteerCmd { HasRate = true, Rate = TiltToRate(tilt, Gain) };
             }
 
             Vector2? p = null;
@@ -84,6 +85,20 @@ namespace Tatva
             return hasTouch ? new SteerCmd { HasTarget = true, Target = touchAngle } : default;
         }
 
+        public const float DeadZone = 4f * Mathf.Deg2Rad;
+        /// <summary>Tilt at which the ship reaches full speed; 45 degrees at 1x sensitivity, less when higher.</summary>
+        public static float FullTilt(float gain) => 45f * Mathf.Deg2Rad / Mathf.Max(0.5f, gain);
+
+        /// <summary>Tilt (radians from level, signed) to angular speed. Dead zone, then an ease-in curve for fine control.</summary>
+        public static float TiltToRate(float tilt, float gain)
+        {
+            float a = Mathf.Abs(tilt), full = FullTilt(gain);
+            if (a <= DeadZone) return 0f;
+            float u = Mathf.Clamp01((a - DeadZone) / (full - DeadZone));
+            return Mathf.Sign(tilt) * Sim.MaxRate * Mathf.Pow(u, 1.4f);
+        }
+
+        /// <summary>Signed tilt of the phone away from level, radians.</summary>
         float ReadGyro(float dt)
         {
             Vector3 g = Input.gyro.gravity;
@@ -122,8 +137,7 @@ namespace Tatva
             float w = Mathf.Clamp01((mag - 0.25f) / 0.5f);
             est = Sim.Mod(est + Sim.AngDiff(meas, est) * Mathf.Min(1f, dt * 6f * w));
 
-            float off = Sim.AngDiff(est, Sim.Bottom) * (Mode == Control.GyroInverted ? -1 : 1);
-            return Sim.Bottom + Gain * off;
+            return Sim.AngDiff(est, Sim.Bottom) * (Mode == Control.GyroInverted ? -1 : 1);
         }
     }
 
