@@ -120,7 +120,7 @@ namespace Tatva
         public const float LeadLimit = 1.6f;
 
         /// <summary>Default linear coefficient, so slow, fine turns move the ship too (v2.1; v1.6–2.0 were purely quadratic).</summary>
-        public const float DefaultFine = 1f;
+        public const float DefaultFine = 1.5f;
 
         /// <summary>Ship angular speed (rad/s) for a phone rotation speed (rad/s, signed): fine·r + 3.5·gain·r², minus the noise floor.</summary>
         public static float RateToShip(float rate, float gain, float fine = DefaultFine)
