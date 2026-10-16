@@ -18,7 +18,8 @@ namespace Tatva
     public sealed class Steering
     {
         public Control Mode = Control.Gyro;
-        public float Gain = 1.25f;
+        public float Gain = 1.25f;              // "Gyors": the quadratic part, reacts to how swiftly the phone turns
+        public float Fine = DefaultFine;        // "Finom": the linear part, for slow fine turns
 
         float est = Sim.Bottom, lastMeas, gyroSign = 1, signVotes, snap;
         bool init, haveLast;
@@ -97,8 +98,8 @@ namespace Tatva
             if (gyro)
             {
                 float rate = ReadGyro(dt);
-                float target = mapper.Step(rate, Gain, dt, theta);
-                LastRate = rate; LastShip = RateToShip(rate, Gain); LastClamped = mapper.Clamped;
+                float target = mapper.Step(rate, Gain, dt, theta, Fine);
+                LastRate = rate; LastShip = RateToShip(rate, Gain, Fine); LastClamped = mapper.Clamped;
                 cmd.HasTunnelTarget = true; cmd.Target = target;
                 return cmd;
             }
@@ -114,15 +115,18 @@ namespace Tatva
         // losing the ship's position.
 
         /// <summary>Rotation speed treated as stillness (gyro noise, hand tremor), rad/s.</summary>
-        public const float NoiseRate = 0.05f;
+        public const float NoiseRate = 0.03f;
         /// <summary>How far the target may run ahead of the ship before the excess is dropped, radians.</summary>
         public const float LeadLimit = 1.6f;
 
-        /// <summary>Ship angular speed (rad/s) for a phone rotation speed (rad/s, signed): k·gain·r², minus the noise floor.</summary>
-        public static float RateToShip(float rate, float gain)
+        /// <summary>Default linear coefficient, so slow, fine turns move the ship too (v2.1; v1.6–2.0 were purely quadratic).</summary>
+        public const float DefaultFine = 1f;
+
+        /// <summary>Ship angular speed (rad/s) for a phone rotation speed (rad/s, signed): fine·r + 3.5·gain·r², minus the noise floor.</summary>
+        public static float RateToShip(float rate, float gain, float fine = DefaultFine)
         {
             float a = Mathf.Max(0f, Mathf.Abs(rate) - NoiseRate);
-            return Mathf.Sign(rate) * 3.5f * gain * a * a;
+            return Mathf.Sign(rate) * (fine * a + 3.5f * gain * a * a);
         }
 
         /// <summary>Turns phone rotation speed into a target angle in tunnel space. Plain C# so the self-test can drive it.</summary>
@@ -133,10 +137,10 @@ namespace Tatva
             public bool Clamped;
             public void Reset() => init = false;
 
-            public float Step(float rate, float gain, float dt, float theta)
+            public float Step(float rate, float gain, float dt, float theta, float fine = DefaultFine)
             {
                 if (!init) { target = theta; init = true; }
-                target = Sim.Mod(target + RateToShip(rate, gain) * dt);
+                target = Sim.Mod(target + RateToShip(rate, gain, fine) * dt);
                 float lead = Sim.AngDiff(target, theta);
                 Clamped = Mathf.Abs(lead) > LeadLimit;
                 if (Clamped) target = Sim.Mod(theta + Mathf.Sign(lead) * LeadLimit);

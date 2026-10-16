@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "2.0";
-        PlayerSettings.Android.bundleVersionCode = 9;
+        PlayerSettings.bundleVersion = "2.1";
+        PlayerSettings.Android.bundleVersionCode = 10;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
@@ -465,14 +465,14 @@ public static class BuildTools
         Fresh(9); Turn(1f); float medium = travelled;
         Fresh(10); Turn(3f); float fast = travelled;
         if (Mathf.Abs(still) > 0.005f) errors.Add($"ship keeps moving after the phone stopped ({still * Mathf.Rad2Deg:0.0} deg in 0.5s)");
-        if (!(medium > slow * 2f && fast > medium * 1.5f && fast > 2.5f))
-            errors.Add($"swifter turn does not move further: 30deg at 0.3/1/3 rad/s -> {slow * Mathf.Rad2Deg:0}/{medium * Mathf.Rad2Deg:0}/{fast * Mathf.Rad2Deg:0} deg");
+        if (!(slow > 0.75f && medium > slow * 2f && fast > medium * 1.15f && fast > 2.5f))
+            errors.Add($"fine turns too weak or swifter turn does not move further: 30deg at 0.3/1/3 rad/s -> {slow * Mathf.Rad2Deg:0}/{medium * Mathf.Rad2Deg:0}/{fast * Mathf.Rad2Deg:0} deg");
 
         // swift dodge, then ease the phone back slowly: the ship should keep most of the dodge
         Fresh(11); Turn(3f); float dodge = travelled;
         Run(-0.25f, 30f * Mathf.Deg2Rad / 0.25f); Run(0, 0.6f);
         float kept = travelled / dodge;
-        if (kept < 0.75f) errors.Add($"slow return undid too much of a dodge: kept {kept * 100:0}%");
+        if (kept < 0.65f) errors.Add($"slow return undid too much of a dodge: kept {kept * 100:0}%");
 
         Fresh(12); Run(0.04f, 2f); Run(-0.04f, 2f);
         if (Mathf.Abs(travelled) > 0.001f) errors.Add($"steady slow drift moved the ship {travelled * Mathf.Rad2Deg:0.0} deg");

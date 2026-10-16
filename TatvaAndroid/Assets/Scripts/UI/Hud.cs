@@ -10,7 +10,9 @@ namespace Tatva
     /// <summary>All screens (title, HUD, game over, pause) built in code with uGUI. No prefabs.</summary>
     public sealed class Hud
     {
-        public event Action Start, Again, Menu, Resume, Pause, ControlCycle, SensCycle;
+        public event Action Start, Again, Menu, Resume, Pause, ControlCycle;
+        /// <summary>-1 or +1 from the "Gyors" (swift turns) and "Finom" (fine turns) steppers.</summary>
+        public event Action<int> SpeedStep, FineStep;
 
         static readonly CultureInfo Hu = CultureInfo.GetCultureInfo("hu-HU");
         public static string Fmt(int n) => n.ToString("N0", Hu);
@@ -32,9 +34,10 @@ namespace Tatva
         readonly Font font;
         readonly Sprite pill;
         readonly GameObject hudRoot, titleRoot, overRoot, pauseRoot;
-        readonly Text score, mult, zoneNo, zoneName, speed, chips, title, tagline, controlLabel, sensLabel, hint, titleBest;
+        readonly Text score, mult, zoneNo, zoneName, speed, chips, title, tagline, controlLabel, speedLabel, fineLabel, hint, titleBest;
         readonly Text overZone, overTitle, overScore, overStats, bannerZone, bannerName;
-        readonly Button controlBtn, sensBtn;
+        readonly Button controlBtn;
+        readonly List<GameObject> gyroRows = new List<GameObject>();
         readonly List<(Text t, float life, float max, Vector2 p)> floats = new List<(Text, float, float, Vector2)>();
         readonly Stack<Text> floatPool = new Stack<Text>();
         float bannerT = 99, multPop;
@@ -98,12 +101,10 @@ namespace Tatva
             controlLabel = controlBtn.GetComponentInChildren<Text>();
             controlBtn.onClick.AddListener(() => ControlCycle?.Invoke());
             Dual(controlBtn, new Vector2(0.74f, 0.5f), new Vector2(0, 60));
-            sensBtn = MakeButton(titleRoot, "", new Vector2(0.5f, 0.5f), new Vector2(0, -260), new Vector2(760, 110), 36, false);
-            sensLabel = sensBtn.GetComponentInChildren<Text>();
-            sensBtn.onClick.AddListener(() => SensCycle?.Invoke());
-            Dual(sensBtn, new Vector2(0.74f, 0.5f), new Vector2(0, -60));
-            hint = Label(titleRoot, "", 32, Mist, TextAnchor.UpperCenter, new Vector2(0.5f, 0.5f), new Vector2(0, -360), new Vector2(940, 260));
-            Dual(hint, new Vector2(0.74f, 0.5f), new Vector2(0, -135), new Vector2(800, 300));
+            speedLabel = Stepper(-250, -55, d => SpeedStep?.Invoke(d));
+            fineLabel = Stepper(-360, -160, d => FineStep?.Invoke(d));
+            hint = Label(titleRoot, "", 30, Mist, TextAnchor.UpperCenter, new Vector2(0.5f, 0.5f), new Vector2(0, -540), new Vector2(940, 260));
+            Dual(hint, new Vector2(0.74f, 0.5f), new Vector2(0, -345), new Vector2(800, 260));
             titleBest = Label(titleRoot, "", 32, Gold, TextAnchor.MiddleCenter, new Vector2(0.5f, 0), new Vector2(0, 90), new Vector2(900, 50));
             Dual(titleBest, new Vector2(0.3f, 0.62f), new Vector2(0, -250));
 
@@ -138,6 +139,21 @@ namespace Tatva
             ShowOnly(titleRoot);
         }
 
+        /// <summary>A "−  label  +" row on the title screen (portrait y, landscape y); returns the label.</summary>
+        Text Stepper(float yP, float yL, Action<int> step)
+        {
+            var minus = MakeButton(titleRoot, "−", new Vector2(0.5f, 0.5f), new Vector2(-315, yP), new Vector2(130, 90), 52, false);
+            var plus = MakeButton(titleRoot, "+", new Vector2(0.5f, 0.5f), new Vector2(315, yP), new Vector2(130, 90), 52, false);
+            var label = Label(titleRoot, "", 32, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.5f), new Vector2(0, yP), new Vector2(480, 90), FontStyle.Bold);
+            minus.onClick.AddListener(() => step(-1));
+            plus.onClick.AddListener(() => step(1));
+            Dual(minus, new Vector2(0.74f, 0.5f), new Vector2(-315, yL));
+            Dual(plus, new Vector2(0.74f, 0.5f), new Vector2(315, yL));
+            Dual(label, new Vector2(0.74f, 0.5f), new Vector2(0, yL));
+            gyroRows.Add(minus.gameObject); gyroRows.Add(plus.gameObject); gyroRows.Add(label.gameObject);
+            return label;
+        }
+
         // ---------- orientation ----------
         void Dual(Component c, Vector2 anchorL, Vector2 posL, Vector2? sizeL = null)
         {
@@ -168,15 +184,15 @@ namespace Tatva
             pauseRoot.SetActive(g == pauseRoot);
         }
 
-        public void ShowTitle(int bestScore, Control control, float gain, bool hasGyro)
+        public void ShowTitle(int bestScore, Control control, float gain, bool hasGyro, float fine = Steering.DefaultFine)
         {
             ShowOnly(titleRoot);
-            SetControl(control, gain, hasGyro);
+            SetControl(control, gain, hasGyro, fine);
             titleBest.text = bestScore > 0 ? $"Rekord: {Fmt(bestScore)}" : "";
             EventSystem.current?.SetSelectedGameObject(null);
         }
 
-        public void SetControl(Control control, float gain, bool hasGyro)
+        public void SetControl(Control control, float gain, bool hasGyro, float fine = Steering.DefaultFine)
         {
             controlLabel.text = control switch
             {
@@ -184,12 +200,13 @@ namespace Tatva
                 Control.GyroInverted => "Irányítás: giroszkóp (fordított)",
                 _ => "Irányítás: érintés",
             };
-            sensLabel.text = $"Érzékenység: {gain.ToString("0.0#", Hu)}×";
-            sensBtn.gameObject.SetActive(control != Control.Touch);
+            speedLabel.text = $"Gyors: {gain.ToString("0.00", Hu)}";
+            fineLabel.text = $"Finom: {fine.ToString("0.00", Hu)}";
+            foreach (var g in gyroRows) g.SetActive(control != Control.Touch);
             hint.text = control == Control.Touch
                 ? "Tartsd az ujjad a képernyő bal vagy jobb oldalán a kanyarodáshoz.\nKét ujj: turbó. Kék gyémánt: pajzs, piros csempe: bomba."
                 : hasGyro
-                    ? "Forgasd a telefont, mint egy kormányt: a hajó csak\nforgatás közben mozog, ha megállsz, megáll.\nTartsd az ujjad a képernyőn: turbó (×1,5 pont)."
+                    ? "Forgasd a telefont, mint egy kormányt: a hajó csak\nforgatás közben mozog, ha megállsz, megáll.\nGyors: a gyors rántásokra, Finom: a lassú, apró forgatásra.\nTartsd az ujjad a képernyőn: turbó (×1,5 pont)."
                     : "Ezen az eszközön nincs giroszkóp, az érintéses irányítás működik.";
         }
 
