@@ -9,7 +9,7 @@ namespace Tatva
     public sealed class GameRoot : MonoBehaviour
     {
         // v2.0 (SpeedX-style rework) scores differently, so it keeps its own record
-        const string BestKey = "tatva.best2", ControlKey = "tatva.control", GainKey = "tatva.gain2", FineKey = "tatva.fine";
+        const string BestKey = "tatva.best2", ControlKey = "tatva.control", GainKey = "tatva.gain2", FineKey = "tatva.fine", ReturnKey = "tatva.ret";
         const float StepSize = 0.1f;
 
         Camera cam;
@@ -41,6 +41,7 @@ namespace Tatva
                 Mode = (Control)Mathf.Clamp(PlayerPrefs.GetInt(ControlKey, Steering.HasGyro ? 0 : 2), 0, 2),
                 Gain = PlayerPrefs.GetFloat(GainKey, 1.25f),
                 Fine = PlayerPrefs.GetFloat(FineKey, Steering.DefaultFine),
+                FreeReturn = PlayerPrefs.GetFloat(ReturnKey, Steering.DefaultFreeReturn),
             };
             if (!Steering.HasGyro) steering.Mode = Control.Touch;
             steering.Enable();
@@ -88,7 +89,8 @@ namespace Tatva
             hud.ControlCycle += CycleControl;
             hud.SpeedStep += d => Tune(ref steering.Gain, d, 0.1f, 4f, GainKey);
             hud.FineStep += d => Tune(ref steering.Fine, d, 0f, 4f, FineKey);
-            hud.ShowTitle(best, steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine);
+            hud.ReturnStep += d => Tune(ref steering.FreeReturn, d, 0f, 2f, ReturnKey);
+            hud.ShowTitle(best, steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine, steering.FreeReturn);
         }
 
         // Full-res MSAA + the bloom chain ran at ~41 fps on a Galaxy A71 (2400x1080); render below native and let the
@@ -193,7 +195,7 @@ namespace Tatva
             audioHost.Synth.SetMuted(false);
             sim.Reset(Mode.Title);
             view.ResetDust(0);
-            hud.ShowTitle(best, steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine);
+            hud.ShowTitle(best, steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine, steering.FreeReturn);
         }
 
         // Landscape only. Menus follow the phone between the two landscape sides; a run locks the
@@ -233,7 +235,7 @@ namespace Tatva
             else steering.Mode = (Control)(((int)steering.Mode + 1) % 3);
             PlayerPrefs.SetInt(ControlKey, (int)steering.Mode);
             steering.Recenter();
-            hud.SetControl(steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine);
+            hud.SetControl(steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine, steering.FreeReturn);
             Music.Click(audioHost.Synth, audioHost.At);
         }
 
@@ -242,7 +244,7 @@ namespace Tatva
             value = Mathf.Clamp(Mathf.Round((value + dir * StepSize) * 100f) / 100f, min, max);
             PlayerPrefs.SetFloat(key, value);
             PlayerPrefs.Save();
-            hud.SetControl(steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine);
+            hud.SetControl(steering.Mode, steering.Gain, Steering.HasGyro, steering.Fine, steering.FreeReturn);
             Music.Click(audioHost.Synth, audioHost.At);
         }
 

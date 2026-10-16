@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "2.2";
-        PlayerSettings.Android.bundleVersionCode = 11;
+        PlayerSettings.bundleVersion = "2.3";
+        PlayerSettings.Android.bundleVersionCode = 12;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
@@ -477,6 +477,27 @@ public static class BuildTools
         Fresh(12); Run(0.04f, 2f); Run(-0.04f, 2f);
         if (Mathf.Abs(travelled) > 0.001f) errors.Add($"steady slow drift moved the ship {travelled * Mathf.Rad2Deg:0.0} deg");
 
+        // free return: rate toward level is cut only when the phone is tilted, and a flick still steers
+        if (Steering.ReturnRate(-0.4f, 0.6f, 0.6f) != 0) errors.Add("free return: a slow return from a big tilt still steers");
+        if (Steering.ReturnRate(-3f, 0.6f, 0.6f) > -2f) errors.Add("free return swallowed a flick back");
+        if (Steering.ReturnRate(-0.4f, 0.05f, 0.6f) != -0.4f) errors.Add("free return acts near level");
+        if (Steering.ReturnRate(0.4f, 0.6f, 0.6f) != 0.4f) errors.Add("free return acts when turning away from level");
+        // a dodge, then the phone eased back to level at 0.3 rad/s, with the tilt tracked like the sensor fusion does
+        Fresh(13); float tiltNow = 0;
+        for (int i = 0; i < Mathf.RoundToInt(0.6f / 3f / dt); i++) { tiltNow += 3f * dt; sim.Update(dt, new SteerCmd { HasTunnelTarget = true, Target = map.Step(3f, G, dt, sim.Theta) }); }
+        Run(0, 0.6f);
+        float dodge2 = sim.Theta, before2 = sim.Theta;
+        while (tiltNow > 0.02f)
+        {
+            float r = Steering.ReturnRate(-0.3f, tiltNow, Steering.DefaultFreeReturn);
+            tiltNow -= 0.3f * dt;
+            sim.Update(dt, new SteerCmd { HasTunnelTarget = true, Target = map.Step(r, G, dt, sim.Theta) });
+        }
+        Run(0, 0.6f);
+        float lost = Mathf.Abs(Sim.AngDiff(sim.Theta, before2));
+        if (lost > 0.35f) errors.Add($"free return: easing the phone back moved the ship {lost * Mathf.Rad2Deg:0} deg");
+
+        Debug.Log($"[SelfTest] free return: easing the phone back from 34 deg moved the ship {lost * Mathf.Rad2Deg:0} deg (only the near-level part counts).");
         Debug.Log($"[SelfTest] rotation steering (1.25x): 30deg phone turn at 0.3/1/3 rad/s -> {slow * Mathf.Rad2Deg:0}/{medium * Mathf.Rad2Deg:0}/{fast * Mathf.Rad2Deg:0} deg ship; " +
                   $"stops when the phone stops; slow return keeps {kept * 100:0}% of a dodge.");
     }

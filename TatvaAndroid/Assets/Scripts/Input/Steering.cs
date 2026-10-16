@@ -20,6 +20,8 @@ namespace Tatva
         public Control Mode = Control.Gyro;
         public float Gain = 1.25f;              // "Gyors": the quadratic part, reacts to how swiftly the phone turns
         public float Fine = DefaultFine;        // "Finom": the linear part, for slow fine turns
+        public float FreeReturn = DefaultFreeReturn; // "Vissza": slower returns toward level than this (rad/s) do not move the ship
+        public bool Clutched;                   // two thumbs on the screen: the phone turns freely
 
         float est = Sim.Bottom, lastMeas, gyroSign = 1, signVotes, snap;
         bool init, haveLast;
@@ -98,6 +100,11 @@ namespace Tatva
             if (gyro)
             {
                 float rate = ReadGyro(dt);
+                float tilt = Sim.AngDiff(est, Sim.Bottom) * (Mode == Control.GyroInverted ? -1 : 1);
+                rate = ReturnRate(rate, tilt, FreeReturn);
+                // two thumbs = clutch: the phone can be turned back to level without moving the ship
+                Clutched = n >= 2;
+                if (Clutched) rate = 0;
                 float target = mapper.Step(rate, Gain, dt, theta, Fine);
                 LastRate = rate; LastShip = RateToShip(rate, Gain, Fine); LastClamped = mapper.Clamped;
                 cmd.HasTunnelTarget = true; cmd.Target = target;
@@ -127,6 +134,25 @@ namespace Tatva
         {
             float a = Mathf.Max(0f, Mathf.Abs(rate) - NoiseRate);
             return Mathf.Sign(rate) * (fine * a + 3.5f * gain * a * a);
+        }
+
+        /// <summary>Default free-return speed, rad/s (v2.3).</summary>
+        public const float DefaultFreeReturn = 0.6f;
+        /// <summary>Tilt from level (rad) where free return starts, and where it is fully on.</summary>
+        public const float ReturnFrom = 0.08f, ReturnFull = 0.25f;
+
+        /// <summary>
+        /// Free return (v2.3): with Finom the ship follows slow turns too, so easing a far-turned phone back to level
+        /// undid the dodge, and the owner had to keep turning the phone round. When the phone is tilted from level
+        /// (tilt, rad, signed like rate) and turns back toward it, up to freeReturn rad/s of that turn is ignored.
+        /// A swift flick back still steers.
+        /// </summary>
+        public static float ReturnRate(float rate, float tilt, float freeReturn)
+        {
+            if (rate * tilt >= 0 || freeReturn <= 0) return rate;
+            float t = Mathf.Abs(tilt), f = Mathf.Clamp01((t - ReturnFrom) / (ReturnFull - ReturnFrom));
+            f = f * f * (3 - 2 * f);
+            return Mathf.Sign(rate) * Mathf.Max(0f, Mathf.Abs(rate) - freeReturn * f);
         }
 
         /// <summary>Turns phone rotation speed into a target angle in tunnel space. Plain C# so the self-test can drive it.</summary>

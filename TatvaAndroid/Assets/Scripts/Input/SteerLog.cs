@@ -41,7 +41,7 @@ namespace Tatva
             sb.Append("# tatva steerlog 1; app ").Append(Application.version)
               .Append("; device ").Append(SystemInfo.deviceModel)
               .Append("; control ").Append(s.Mode)
-              .Append("; gain ").Append(F(s.Gain)).Append("; fine ").Append(F(s.Fine))
+              .Append("; gain ").Append(F(s.Gain)).Append("; fine ").Append(F(s.Fine)).Append("; ret ").Append(F(s.FreeReturn))
               .Append("; noise ").Append(F(Steering.NoiseRate))
               .Append("; lead ").Append(F(Steering.LeadLimit))
               .Append("; maxrate ").Append(F(Sim.MaxRate))

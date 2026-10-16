@@ -12,7 +12,7 @@ namespace Tatva
     {
         public event Action Start, Again, Menu, Resume, Pause, ControlCycle;
         /// <summary>-1 or +1 from the "Gyors" (swift turns) and "Finom" (fine turns) steppers.</summary>
-        public event Action<int> SpeedStep, FineStep;
+        public event Action<int> SpeedStep, FineStep, ReturnStep;
 
         static readonly CultureInfo Hu = CultureInfo.GetCultureInfo("hu-HU");
         public static string Fmt(int n) => n.ToString("N0", Hu);
@@ -34,7 +34,7 @@ namespace Tatva
         readonly Font font;
         readonly Sprite pill;
         readonly GameObject hudRoot, titleRoot, overRoot, pauseRoot;
-        readonly Text score, mult, zoneNo, zoneName, speed, chips, title, tagline, controlLabel, speedLabel, fineLabel, hint, titleBest;
+        readonly Text score, mult, zoneNo, zoneName, speed, chips, title, tagline, controlLabel, speedLabel, fineLabel, retLabel, hint, titleBest;
         readonly Text overZone, overTitle, overScore, overStats, bannerZone, bannerName;
         readonly Button controlBtn;
         readonly List<GameObject> gyroRows = new List<GameObject>();
@@ -101,10 +101,11 @@ namespace Tatva
             controlLabel = controlBtn.GetComponentInChildren<Text>();
             controlBtn.onClick.AddListener(() => ControlCycle?.Invoke());
             Dual(controlBtn, new Vector2(0.74f, 0.5f), new Vector2(0, 60));
-            speedLabel = Stepper(-250, -55, d => SpeedStep?.Invoke(d));
-            fineLabel = Stepper(-360, -160, d => FineStep?.Invoke(d));
-            hint = Label(titleRoot, "", 30, Mist, TextAnchor.UpperCenter, new Vector2(0.5f, 0.5f), new Vector2(0, -540), new Vector2(940, 260));
-            Dual(hint, new Vector2(0.74f, 0.5f), new Vector2(0, -345), new Vector2(800, 260));
+            speedLabel = Stepper(-250, -45, d => SpeedStep?.Invoke(d));
+            fineLabel = Stepper(-360, -140, d => FineStep?.Invoke(d));
+            retLabel = Stepper(-470, -235, d => ReturnStep?.Invoke(d));
+            hint = Label(titleRoot, "", 28, Mist, TextAnchor.UpperCenter, new Vector2(0.5f, 0.5f), new Vector2(0, -650), new Vector2(940, 260));
+            Dual(hint, new Vector2(0.74f, 0.5f), new Vector2(0, -345), new Vector2(860, 130));
             titleBest = Label(titleRoot, "", 32, Gold, TextAnchor.MiddleCenter, new Vector2(0.5f, 0), new Vector2(0, 90), new Vector2(900, 50));
             Dual(titleBest, new Vector2(0.3f, 0.62f), new Vector2(0, -250));
 
@@ -184,15 +185,15 @@ namespace Tatva
             pauseRoot.SetActive(g == pauseRoot);
         }
 
-        public void ShowTitle(int bestScore, Control control, float gain, bool hasGyro, float fine = Steering.DefaultFine)
+        public void ShowTitle(int bestScore, Control control, float gain, bool hasGyro, float fine = Steering.DefaultFine, float ret = Steering.DefaultFreeReturn)
         {
             ShowOnly(titleRoot);
-            SetControl(control, gain, hasGyro, fine);
+            SetControl(control, gain, hasGyro, fine, ret);
             titleBest.text = bestScore > 0 ? $"Rekord: {Fmt(bestScore)}" : "";
             EventSystem.current?.SetSelectedGameObject(null);
         }
 
-        public void SetControl(Control control, float gain, bool hasGyro, float fine = Steering.DefaultFine)
+        public void SetControl(Control control, float gain, bool hasGyro, float fine = Steering.DefaultFine, float ret = Steering.DefaultFreeReturn)
         {
             controlLabel.text = control switch
             {
@@ -202,11 +203,12 @@ namespace Tatva
             };
             speedLabel.text = $"Gyors: {gain.ToString("0.00", Hu)}";
             fineLabel.text = $"Finom: {fine.ToString("0.00", Hu)}";
+            retLabel.text = ret > 0 ? $"Visszaengedés: {ret.ToString("0.0", Hu)}" : "Visszaengedés: ki";
             foreach (var g in gyroRows) g.SetActive(control != Control.Touch);
             hint.text = control == Control.Touch
                 ? "Tartsd az ujjad a képernyő bal vagy jobb oldalán a kanyarodáshoz.\nKét ujj: turbó. Kék gyémánt: pajzs, piros csempe: bomba."
                 : hasGyro
-                    ? "Forgasd a telefont, mint egy kormányt: a hajó csak\nforgatás közben mozog, ha megállsz, megáll.\nGyors: a gyors rántásokra, Finom: a lassú, apró forgatásra.\nTartsd az ujjad a képernyőn: turbó (×1,5 pont)."
+                    ? "Forgasd, mint egy kormányt. Ujj a képernyőn: turbó.\nLassan vízszintesbe visszaforgatva a hajó nem mozdul.\nKét hüvelykujj a képernyőn: szabadon forgathatod a telefont."
                     : "Ezen az eszközön nincs giroszkóp, az érintéses irányítás működik.";
         }
 
