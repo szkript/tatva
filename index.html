@@ -130,7 +130,7 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--mist); 
   <p class="tag">Fénysebesség a ritmusra</p>
   <button id="start" class="btn" type="button">Indítás</button>
   <ul class="how">
-    <li><b><kbd>←</kbd> <kbd>→</kbd></b> vagy <b><kbd>A</kbd> <kbd>D</kbd></b>: kanyarodás. <b>Egérrel</b> elég mozgatni: a hajó oda megy, ahová a kurzor mutat (a képernyő szélessége a pálya egy teljes köre). Érintőn tartsd az ujjad a képernyő bal vagy jobb oldalán</li>
+    <li><b><kbd>←</kbd> <kbd>→</kbd></b> vagy <b><kbd>A</kbd> <kbd>D</kbd></b>: kanyarodás. <b>Egérrel</b> elég mozgatni: a hajó oda megy, ahová a kurzor mutat (a képernyő szélessége a pálya egy teljes köre). Menet közben a kurzor be van zárva az ablakba, <kbd>Esc</kbd> engedi el. Érintőn tartsd az ujjad a képernyő bal vagy jobb oldalán</li>
     <li><b><kbd>↑</kbd> / <kbd>W</kbd> / <kbd>Shift</kbd> / bal egérgomb:</b> turbó, gyorsabb és ×1,5 pont (érintőn: két ujj)</li>
     <li>A pálya <b>cső</b>, <b>síkság</b> és <b>külső pálya</b> között vált, a sebesség egyre nő</li>
     <li><b>Kék gyémánt:</b> pajzs · <b>piros csempe:</b> bomba · az <b>izzó sáv</b> felbukkanó oszlopot jelez</li>
@@ -516,6 +516,7 @@ function startGame() {
   audioInit();
   reset();
   S.mode = 'play'; S.paused = false; S.music = true;
+  input.mouseX = CX; input.mouseOn = false; lockMouse(true);
   if (Z0) { S.dist = Z0 * ZL - 60; S.nextS = S.dist + 40; S.runT = Z0 * 25; }
   $('title').hidden = true; $('over').hidden = true; $('pause').hidden = true; $('hud').hidden = false;
   $('zoneNo').textContent = 1; $('zoneName').textContent = ZNAMES[0]; $('shapeName').textContent = SHAPE_NAMES[SHAPES[0]];
@@ -602,6 +603,7 @@ function hit(o) {
   sfxBreak();
 }
 function die() {
+  lockMouse(false);
   S.mode = 'dead'; S.music = false; S.deadT = 0; S.tsT = 0.035; S.ts = 0.2;
   S.shake = 1; S.flash = 1;
   const [x, y] = shipXY();
@@ -625,6 +627,7 @@ function die() {
 function setPaused(p) {
   if (S.mode !== 'play') return;
   S.paused = p; $('pause').hidden = !p;
+  lockMouse(!p);
   if (A.ctx) { if (p) A.ctx.suspend(); else A.ctx.resume(); }
   last = performance.now();
 }
@@ -1090,15 +1093,37 @@ function draw() {
 
 // ---------- input ----------
 function canRestart() { return S.mode === 'dead' && S.overShown && S.deadT > 1.4; }
+// pointer lock keeps the cursor inside the game during a run (mouse devices only)
+const finePointer = matchMedia('(pointer: fine)').matches;
+const locked = () => document.pointerLockElement === cv;
+function lockMouse(on) {
+  try {
+    if (on && finePointer && !locked() && cv.requestPointerLock) {
+      const r = cv.requestPointerLock();
+      if (r && r.catch) r.catch(() => { /* refused (no user gesture or cooldown): plain cursor still works */ });
+    } else if (!on && locked()) document.exitPointerLock();
+  } catch (e) { /* pointer lock unsupported */ }
+}
+document.addEventListener('pointerlockchange', () => {
+  if (!locked() && S.mode === 'play' && !S.paused) setPaused(true);   // Esc or alt-tab released the cursor
+});
+
 // mouse: the ship goes where the cursor points, no button needed; a held button boosts.
 // touch: hold the left or right side to steer, two fingers boost
 cv.addEventListener('pointerdown', e => {
   if (canRestart()) { startGame(); return; }
-  if (e.pointerType === 'mouse') { input.mouseX = e.clientX * DPR; input.mouseDown = true; }
+  if (e.pointerType === 'mouse') {
+    input.mouseDown = true;
+    if (!locked()) { input.mouseX = e.clientX * DPR; lockMouse(true); }
+  }
   else input.ptrs.set(e.pointerId, e.clientX * DPR);
 });
 addEventListener('pointermove', e => {
-  if (e.pointerType === 'mouse') { input.mouseX = e.clientX * DPR; if (S.mode === 'play') input.mouseOn = true; }
+  if (e.pointerType === 'mouse') {
+    // while the pointer is locked the cursor cannot leave the window: move a virtual cursor instead
+    input.mouseX = locked() ? clamp(input.mouseX + e.movementX * DPR, 0, W) : e.clientX * DPR;
+    if (S.mode === 'play') input.mouseOn = true;
+  }
   else if (input.ptrs.has(e.pointerId)) input.ptrs.set(e.pointerId, e.clientX * DPR);
 });
 const lift = e => { if (e.pointerType === 'mouse') input.mouseDown = false; else input.ptrs.delete(e.pointerId); };
@@ -1117,7 +1142,8 @@ addEventListener('keydown', e => {
     e.preventDefault();
     if (S.mode === 'title' || canRestart()) startGame(); else if (S.paused) setPaused(false);
   }
-  else if (k === 'p' || k === 'P' || k === 'Escape') setPaused(!S.paused);
+  else if (k === 'p' || k === 'P') setPaused(!S.paused);
+  else if (k === 'Escape') { if (!S.paused) setPaused(true); }
   else if (k === 'm' || k === 'M') setMuted(!A.muted);
 });
 addEventListener('keyup', e => {
