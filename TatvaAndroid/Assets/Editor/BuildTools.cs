@@ -38,8 +38,8 @@ public static class BuildTools
         PlayerSettings.companyName = "kkodelab";
         PlayerSettings.productName = "Tátva";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageName);
-        PlayerSettings.bundleVersion = "1.7";
-        PlayerSettings.Android.bundleVersionCode = 8;
+        PlayerSettings.bundleVersion = "2.0";
+        PlayerSettings.Android.bundleVersionCode = 9;
 
         // landscape only (either side); GameRoot locks the side while a run is on
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
@@ -132,71 +132,98 @@ public static class BuildTools
         Debug.Log("[SelfTest] All runtime checks passed.");
     }
 
-    /// <summary>Every wall group the generator emits must leave a passable gap; AI flies 25 minutes.</summary>
+    static bool Solid(Obstacle o) => o.K == Kind.Box || o.K == Kind.Pyr;
+    static SteerCmd Pilot(Sim s) => new SteerCmd { HasTunnelTarget = true, Target = s.AiTarget() };
+
+    /// <summary>
+    /// The generator must never close the track: 7 minutes of play through every zone (invulnerable, demo pilot
+    /// flying), and at every half unit of track some lateral position clears all static obstacles there.
+    /// </summary>
     static void TestLevels(List<string> errors)
     {
         var sim = new Sim(1234);
-        sim.Reset(Mode.Title);
+        sim.Reset(Mode.Play);
+        sim.God = true;
+        float checkedTo = 0;
+        int slices = 0, closed = 0, solids = 0, clipped = 0, maxZone = 0;
         var seen = new HashSet<Obstacle>();
-        int walls = 0, aiHits = 0, groups = 0;
-        float maxZone = 0;
-        for (int f = 0; f < 60 * 60 * 25; f++)
+        var near = new List<Obstacle>();
+        for (int f = 0; f < 60 * 60 * 7; f++)
         {
-            sim.Update(1f / 60f, default);
-            for (int i = 1; i < sim.Obs.Count; i++)
-                if (sim.Obs[i].S < sim.Obs[i - 1].S - 1e-4f) { errors.Add($"obstacles out of order at frame {f}"); return; }
-            foreach (var o in sim.Obs)
-            {
-                if (!o.Wall || seen.Contains(o)) continue;
-                var grp = sim.Obs.Where(q => q.Wall && Mathf.Abs(q.S - o.S) < 1e-4f).ToList();
-                foreach (var q in grp) seen.Add(q);
-                groups++;
-                bool open = false;
-                for (int k = 0; k < 360 && !open; k++)
-                {
-                    float a = k * Sim.TAU / 360f;
-                    if (grp.All(q => Sim.ArcInfo(a, q.A, q.W) >= 0.12f)) open = true;
-                }
-                if (!open) errors.Add($"closed wall group at s={o.S:0.0} (zone {Mathf.FloorToInt(o.S / Sim.D / 32)})");
-            }
-            foreach (var o in sim.Obs)
-                if (o.Wall && o.Done && o.MinE < 8 && !float.IsNaN(o.MinE)) { walls++; if (o.MinE < -Sim.HB) aiHits++; o.MinE = 9; }
+            sim.Update(1f / 60f, Pilot(sim));
             maxZone = Mathf.Max(maxZone, sim.Zone);
+            foreach (var o in sim.Obs)
+                if (Solid(o) && o.Passed && seen.Add(o)) { solids++; if (o.MinL < -0.05f) clipped++; }
+
+            // check the stretch that is fully generated and still in the list
+            float upTo = sim.NextS - 30;
+            if (upTo - checkedTo < 20) continue;
+            checkedTo = Mathf.Max(checkedTo, sim.Dist + 1);
+            for (float s = checkedTo; s < upTo; s += 0.5f)
+            {
+                near.Clear();
+                foreach (var o in sim.Obs)
+                    if (Solid(o) && o.Amp == 0 && Mathf.Abs(o.S - s) <= o.D / 2) near.Add(o);
+                slices++;
+                bool open = false;
+                for (int i = 0; i < 192 && !open; i++)
+                {
+                    float u = i * Sim.C / 192f;
+                    open = near.All(o => Mathf.Abs(Sim.WrapU(o.U - u)) >= (o.K == Kind.Pyr ? o.W * 0.36f : o.W / 2) + Sim.PW / 2 + 0.15f);
+                }
+                if (!open && ++closed <= 5) errors.Add($"track closed at s={s:0.0} (zone {Mathf.FloorToInt(s / Sim.ZL) + 1}, {near.Count} obstacles)");
+            }
+            checkedTo = upTo;
         }
-        if (maxZone < 8) errors.Add("demo run did not reach zone 9 (got " + (maxZone + 1) + ")");
-        Debug.Log($"[SelfTest] levels: {groups} wall groups, all passable; zone reached {maxZone + 1}; AI pilot clipped {aiHits}/{walls} walls.");
+        if (maxZone < 8) errors.Add("the run did not reach zone 9 (got " + (maxZone + 1) + ")");
+        Debug.Log($"[SelfTest] levels: {slices} track slices checked, {closed} closed; zone reached {maxZone + 1}, top speed {sim.MaxV * Sim.KMH:0} km/h; demo pilot clipped {clipped}/{solids} obstacles.");
     }
 
     static void TestPlay(List<string> errors)
     {
         var sim = new Sim(99);
         sim.Reset(Mode.Play);
-        int steps = 0, grazes = 0, orbs = 0; bool died = false;
+        int steps = 0, grazes = 0; bool died = false;
         sim.Step += _ => steps++;
         sim.Grazed += _ => grazes++;
-        sim.OrbTaken += (_, __) => orbs++;
         sim.Died += () => died = true;
         int f = 0;
-        for (; f < 60 * 60 * 5 && !died; f++)
-            sim.Update(1f / 60f, new SteerCmd { HasTarget = true, Target = sim.AiTarget() + sim.Roll });
+        for (; f < 60 * 60 * 5 && !died; f++) sim.Update(1f / 60f, Pilot(sim));
         if (steps < 100) errors.Add("music steps did not fire (" + steps + ")");
         if (sim.Score <= 0) errors.Add("score stayed at zero");
-        Debug.Log($"[SelfTest] play: AI-steered run lasted {f / 60f:0.0}s, zone {sim.Zone + 1}, score {sim.Score}, grazes {grazes}, orbs {orbs}, died={died}.");
+        Debug.Log($"[SelfTest] play: demo-piloted run lasted {f / 60f:0.0}s, zone {sim.Zone + 1}, {sim.Dist:0} m, score {sim.Score}, grazes {grazes}, died={died}.");
 
-        // a player who never steers must crash into the first gate
+        // a player who never steers must crash
         var idle = new Sim(5);
         bool idleDied = false;
         idle.Died += () => idleDied = true;
         idle.Reset(Mode.Play);
-        for (int i = 0; i < 60 * 30 && !idleDied; i++) idle.Update(1f / 60f, default);
+        for (int i = 0; i < 60 * 60 && !idleDied; i++) idle.Update(1f / 60f, default);
         if (!idleDied) errors.Add("an idle player never crashed: collisions are not working");
+
+        // pickups: a shield absorbs one hit, a bomb tile clears what is ahead
+        var p = new Sim(6);
+        p.Reset(Mode.Play);
+        bool shieldTaken = false, broke = false, pDied = false; int blasted = 0;
+        p.ShieldTaken += () => shieldTaken = true;
+        p.ShieldBroke += _ => broke = true;
+        p.Bombed += (_, list) => blasted = list.Count;
+        p.Died += () => pDied = true;
+        p.Obs.Add(new Obstacle { K = Kind.Shield, S = 8, U = p.U });
+        p.Obs.Add(new Obstacle { K = Kind.Box, S = 20, U = p.U, W = 1, D = 1.4f, H = 1 });
+        p.Obs.Add(new Obstacle { K = Kind.Bomb, S = 40, U = p.U });
+        for (int i = 0; i < 6; i++) p.Obs.Add(new Obstacle { K = Kind.Box, S = 50 + i * 4, U = p.U, W = 1, D = 1.4f, H = 1 });
+        for (int i = 0; i < 60 * 3 && !pDied; i++) p.Update(1f / 60f, default);
+        if (!shieldTaken) errors.Add("shield pickup was not collected");
+        if (!broke || pDied) errors.Add($"shield did not absorb the hit (broke={broke}, died={pDied})");
+        if (blasted < 6) errors.Add($"bomb tile cleared {blasted} obstacles, expected at least 6");
     }
 
     static void TestSynth(List<string> errors)
     {
         var s = new Synth(48000);
         for (int step = 0; step < 96; step++) Music.Step(s, step, 5, 140, (long)(step * 60f / 140f / 4f * 48000));
-        Music.Graze(s, 24000); Music.Orb(s, 30000, 3); Music.Zone(s, 60000); Music.Death(s, 200000);
+        Music.Graze(s, 24000); Music.Orb(s, 30000, 3); Music.Zone(s, 60000); Music.Bomb(s, 90000); Music.ShieldBreak(s, 120000); Music.Death(s, 200000);
         var buf = new float[1024 * 2];
         float peak = 0; double energy = 0; int n = 0;
         for (int b = 0; b < 48000 * 7 / 1024; b++)
@@ -214,31 +241,45 @@ public static class BuildTools
         Debug.Log($"[SelfTest] synth: 7s rendered, peak {peak:0.000}, rms {rms:0.000}.");
     }
 
+    /// <summary>Every track shape renders without NaNs and within a sane vertex budget.</summary>
     static void TestRender(List<string> errors)
     {
-        var sim = new Sim(42);
-        sim.Reset(Mode.Title);
         var painter = new Painter();
-        var view = new TunnelRenderer();
-        view.Resize(1080, 2400, 2.6f);
-        int maxVerts = 0;
-        for (int f = 0; f < 60 * 120; f++)
+        var view = new TrackRenderer();
+        view.Resize(2400, 1080, 2.6f);
+        int maxVerts = 0, maxFx = 0;
+        try
         {
-            sim.Update(1f / 60f, default);
-            view.Tick(sim, 1f / 60f);
-            if (f % 30 != 0) continue;
-            view.Draw(sim, painter);
-            painter.Upload();
-            maxVerts = Mathf.Max(maxVerts, painter.VertexCount);
-            var verts = painter.Mesh.vertices;
-            if (verts.Any(v => float.IsNaN(v.x) || float.IsNaN(v.y))) { errors.Add("renderer produced NaN vertices at frame " + f); break; }
+            for (int z = 0; z < 8; z++)
+            {
+                var sim = new Sim(42 + z);
+                sim.Reset(Mode.Play);
+                sim.God = true;
+                sim.SkipTo(z);
+                for (int f = 0; f < 60 * 15; f++)
+                {
+                    sim.Update(1f / 60f, Pilot(sim));
+                    view.Tick(sim, 1f / 60f);
+                    if (f % 20 != 0) continue;
+                    view.Draw(sim, painter);
+                    painter.Upload();
+                    maxVerts = Mathf.Max(maxVerts, view.VertexCount);
+                    maxFx = Mathf.Max(maxFx, painter.VertexCount);
+                    if (view.Solid.vertices.Any(v => float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z))) { errors.Add($"track mesh has NaN vertices (zone {z + 1})"); return; }
+                    if (painter.Mesh.vertices.Any(v => float.IsNaN(v.x) || float.IsNaN(v.y))) { errors.Add($"overlay has NaN vertices (zone {z + 1})"); return; }
+                }
+                view.OnDeath(sim);
+                view.Tick(sim, 0.1f);
+                view.Draw(sim, painter);
+            }
+            if (maxVerts > 120000) errors.Add("track mesh too heavy: " + maxVerts + " vertices");
+            Debug.Log($"[SelfTest] render: all 8 zones (tube, plain, outside), max {maxVerts} track and {maxFx} overlay vertices per frame.");
         }
-        view.OnDeath(sim);
-        view.Tick(sim, 0.1f);
-        view.Draw(sim, painter);
-        if (maxVerts > 400000) errors.Add("frame mesh too heavy: " + maxVerts + " vertices");
-        UnityEngine.Object.DestroyImmediate(painter.Mesh);
-        Debug.Log($"[SelfTest] render: 2 minutes of frames, max {maxVerts} vertices per frame.");
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(painter.Mesh);
+            UnityEngine.Object.DestroyImmediate(view.Solid);
+        }
     }
 
     static void TestHud(List<string> errors)
@@ -250,8 +291,9 @@ public static class BuildTools
             hud.ShowTitle(12345, Control.Gyro, 1.6f, true);
             hud.SetControl(Control.Touch, 1.6f, false);
             hud.ShowPlay(12345);
-            hud.SetScore(98765); hud.SetMult(4, true); hud.SetZone(7);
+            hud.SetScore(98765); hud.SetMult(4, true); hud.SetZone(7, -1); hud.SetSpeed(612); hud.SetChips(true, true);
             hud.Banner(3, Color.cyan);
+            hud.Banner("V E S Z É L Y", "ÁRAMSZÜNET", Color.red);
             hud.Float("Hajszál! +200", new Vector2(100, -300), Color.white, 64);
             for (int i = 0; i < 120; i++) hud.Tick(1f / 60f, 200);
             var sim = new Sim(1); sim.Reset(Mode.Play);
@@ -260,6 +302,7 @@ public static class BuildTools
             var texts = root.GetComponentsInChildren<UnityEngine.UI.Text>(true).Select(t => t.text).ToList();
             if (!texts.Contains("TÁTVA")) errors.Add("title text missing");
             if (!texts.Any(t => t.Contains("98"))) errors.Add("score label did not update");
+            if (!texts.Any(t => t.Contains("km/h"))) errors.Add("speed label missing");
             Debug.Log($"[SelfTest] hud: {texts.Count} labels built.");
         }
         finally
@@ -271,62 +314,87 @@ public static class BuildTools
     }
 
     /// <summary>
-    /// Renders frames with bloom and the UI (canvas switched to screen-space-camera) to Builds/snap_*.png,
-    /// in portrait and landscape, for a visual check. Needs a graphics device (no -nographics).
+    /// Renders frames (track, overlay, UI, bloom) to Builds/snap_*.png in landscape for a visual check:
+    /// the title, each track shape, and the game-over screen. Needs a graphics device (no -nographics).
     /// </summary>
     public static void Snapshot()
     {
         Directory.CreateDirectory("Builds");
-        Shot(1080, 2400, 60 * 50, "title", "portrait_title");
-        Shot(1080, 2400, 60 * 75, "play", "portrait_play");
-        Shot(2400, 1080, 60 * 50, "title", "landscape_title");
-        Shot(2400, 1080, 60 * 75, "play", "landscape_play");
-        Shot(2400, 1080, 60 * 20, "over", "landscape_over");
+        Shot(2400, 1080, 0, 60 * 8, "title", "title");
+        Shot(2400, 1080, 0, 60 * 9, "play", "tube");
+        Shot(2400, 1080, 2, 60 * 9, "play", "plain");
+        Shot(2400, 1080, 4, 60 * 9, "play", "outside");
+        Shot(2400, 1080, 3, 60 * 4, "over", "over");
         Debug.Log("[BuildTools] Snapshots written to Builds/.");
     }
 
-    static void Shot(int W, int H, int frames, string screen, string name)
+    static void Shot(int W, int H, int zone, int frames, string screen, string name)
     {
         var sim = new Sim(3);
-        sim.Reset(Mode.Title);
+        sim.Reset(screen == "title" ? Mode.Title : Mode.Play);
+        sim.God = true;
+        sim.SkipTo(zone);
         var painter = new Painter();
-        var view = new TunnelRenderer();
+        var view = new TrackRenderer();
         view.Resize(W, H, 2.6f);
         var root = new GameObject("SnapRoot");
         var camGo = new GameObject("SnapCam", typeof(Camera));
         camGo.transform.SetParent(root.transform, false);
-        var meshGo = new GameObject("SnapMesh", typeof(MeshFilter), typeof(MeshRenderer));
-        meshGo.transform.SetParent(root.transform, false);
+        var uiCamGo = new GameObject("SnapUiCam", typeof(Camera));
+        uiCamGo.transform.SetParent(root.transform, false);
+        var trackGo = new GameObject("SnapTrack", typeof(MeshFilter), typeof(MeshRenderer));
+        trackGo.transform.SetParent(root.transform, false);
+        var fxGo = new GameObject("SnapOverlay", typeof(MeshFilter), typeof(MeshRenderer));
+        fxGo.transform.SetParent(camGo.transform, false);
         var rt = new RenderTexture(W, H, 24, RenderTextureFormat.ARGB32);
         var bloomMat = new Material(Resources.Load<Shader>("Shaders/TatvaBloom"));
+        const int UiLayer = 5;
         try
         {
             var cam = camGo.GetComponent<Camera>();
-            cam.orthographic = true; cam.orthographicSize = H / 2f; cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.transform.position = new Vector3(0, 0, -10); cam.nearClipPlane = 0.1f; cam.farClipPlane = 100;
-            meshGo.GetComponent<MeshFilter>().sharedMesh = painter.Mesh;
-            meshGo.GetComponent<MeshRenderer>().sharedMaterial = new Material(Resources.Load<Shader>("Shaders/TatvaPrim"));
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.cullingMask = ~(1 << UiLayer);
+            trackGo.GetComponent<MeshFilter>().sharedMesh = view.Solid;
+            trackGo.GetComponent<MeshRenderer>().sharedMaterial = new Material(Resources.Load<Shader>("Shaders/TatvaSolid"));
+            fxGo.GetComponent<MeshFilter>().sharedMesh = painter.Mesh;
+            fxGo.GetComponent<MeshRenderer>().sharedMaterial = new Material(Resources.Load<Shader>("Shaders/TatvaPrim")) { renderQueue = 3100 };
 
-            for (int f = 0; f < frames; f++) { sim.Update(1f / 60f, default); view.Tick(sim, 1f / 60f); }
+            for (int f = 0; f < frames; f++) { sim.Update(1f / 60f, screen == "title" ? default : Pilot(sim)); view.Tick(sim, 1f / 60f); }
             view.Draw(sim, painter);
             painter.Upload();
-            cam.backgroundColor = Painter.Hsl(sim.Hue, 45, 3.5f, 1, false);
+            view.ApplyCamera(cam, fxGo.transform);
 
             var raw = RenderTexture.GetTemporary(W, H, 24);
             cam.targetTexture = raw;
-
-            var hud = new Hud(root.transform, Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")) { AutoOrient = false };
-            hud.SetLandscape(W > H);
-            hud.Canvas.renderMode = RenderMode.ScreenSpaceCamera;
-            hud.Canvas.worldCamera = cam;
-            hud.Canvas.planeDistance = 5;
-            if (screen == "title") hud.ShowTitle(48210, Control.Gyro, 1.6f, true);
-            else if (screen == "play") { hud.ShowPlay(48210); hud.SetScore(sim.Dist > 0 ? 12650 : 0); hud.SetMult(4, false); hud.SetZone(sim.Zone); }
-            else { var dead = new Sim(1); dead.Reset(Mode.Play); dead.Score = 31480; dead.Zone = 4; dead.Grazes = 37; dead.Orbs = 12; dead.Beats = 210; hud.ShowOver(dead, 48210, false); }
-            Canvas.ForceUpdateCanvases();
-
             cam.Render();
             cam.targetTexture = null;
+
+            // UI through its own orthographic camera (the game camera has an off-centre custom projection)
+            var uiCam = uiCamGo.GetComponent<Camera>();
+            uiCam.orthographic = true; uiCam.clearFlags = CameraClearFlags.Nothing; uiCam.cullingMask = 1 << UiLayer;
+            uiCam.transform.position = new Vector3(0, 0, -100); uiCam.nearClipPlane = 0.1f; uiCam.farClipPlane = 200;
+            var hud = new Hud(root.transform, Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")) { AutoOrient = false };
+            hud.SetLandscape(true);
+            hud.Canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            hud.Canvas.worldCamera = uiCam;
+            hud.Canvas.planeDistance = 50;
+            foreach (var t in hud.Canvas.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = UiLayer;
+            if (screen == "title") hud.ShowTitle(48210, Control.Gyro, 1.25f, true);
+            else if (screen == "play")
+            {
+                hud.ShowPlay(48210); hud.SetScore(sim.Score); hud.SetMult(3, false); hud.SetZone(sim.Zone, sim.Shape);
+                hud.SetSpeed(Mathf.RoundToInt(sim.V * Sim.KMH)); hud.SetChips(true, false);
+            }
+            else
+            {
+                var dead = new Sim(1); dead.Reset(Mode.Play); dead.Score = 31480; dead.Zone = 4; dead.Grazes = 37; dead.Dist = 5321; dead.MaxV = 61;
+                hud.ShowOver(dead, 48210, false);
+            }
+            Canvas.ForceUpdateCanvases();
+            uiCam.targetTexture = raw;
+            uiCam.Render();
+            uiCam.targetTexture = null;
+
             var half = RenderTexture.GetTemporary(W / 2, H / 2); var q1 = RenderTexture.GetTemporary(W / 4, H / 4); var q2 = RenderTexture.GetTemporary(W / 4, H / 4);
             var e1 = RenderTexture.GetTemporary(W / 8, H / 8); var e2 = RenderTexture.GetTemporary(W / 8, H / 8);
             Graphics.Blit(raw, half, bloomMat, 0); Graphics.Blit(half, q1, bloomMat, 0);
@@ -334,7 +402,7 @@ public static class BuildTools
             Graphics.Blit(q1, e1, bloomMat, 0);
             bloomMat.SetFloat("_Spread", 1.6f); Graphics.Blit(e1, e2, bloomMat, 1); Graphics.Blit(e2, e1, bloomMat, 2);
             bloomMat.SetTexture("_Bloom1", q1); bloomMat.SetTexture("_Bloom2", e1);
-            bloomMat.SetFloat("_Int1", 0.9f); bloomMat.SetFloat("_Int2", 0.7f);
+            bloomMat.SetFloat("_Int1", 0.55f); bloomMat.SetFloat("_Int2", 0.45f);
             Graphics.Blit(raw, rt, bloomMat, 3);
             foreach (var t in new[] { raw, half, q1, q2, e1, e2 }) RenderTexture.ReleaseTemporary(t);
 
@@ -351,6 +419,7 @@ public static class BuildTools
             var es = UnityEngine.Object.FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>();
             if (es != null) UnityEngine.Object.DestroyImmediate(es.gameObject);
             UnityEngine.Object.DestroyImmediate(painter.Mesh);
+            UnityEngine.Object.DestroyImmediate(view.Solid);
             rt.Release();
         }
     }
@@ -387,7 +456,7 @@ public static class BuildTools
             }
             return travelled - start;
         }
-        void Fresh(int seed) { sim = new Sim(seed); sim.Reset(Mode.Play); map.Reset(); travelled = 0; Run(0, 0.1f); }
+        void Fresh(int seed) { sim = new Sim(seed); sim.Reset(Mode.Play); sim.God = true; map.Reset(); travelled = 0; Run(0, 0.1f); }
 
         // the same 30 degree phone turn at three speeds, then let the ship settle
         float Turn(float rate) { Run(rate, 30f * Mathf.Deg2Rad / rate); return Run(0, 0.6f); }

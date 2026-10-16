@@ -295,6 +295,19 @@ namespace Tatva
             s.Noise(at, 1.6f, 0.22f, Synth.Filt.High, 5200, 0, 0.5f);
         }
 
+        public static void Bomb(Synth s, long at)
+        {
+            s.Noise(at, 1.4f, 0.9f, Synth.Filt.Low, 3000, 60, 1f);
+            s.Tone(at, Synth.Wave.Sine, 140, 30, 0.8f, 1f, 0.9f);
+            s.Noise(at, 0.9f, 0.3f, Synth.Filt.High, 6000, 0, 0.5f);
+        }
+
+        public static void ShieldBreak(Synth s, long at)
+        {
+            s.Noise(at, 0.5f, 0.7f, Synth.Filt.Band, 3000, 300, 1.4f);
+            s.Tone(at, Synth.Wave.Square, 880, 220, 0.3f, 0.35f, 0.08f);
+        }
+
         public static void Click(Synth s, long at) => s.Tone(at, Synth.Wave.Sine, 1320, 0, 0, 0.08f, 0.15f);
     }
 }

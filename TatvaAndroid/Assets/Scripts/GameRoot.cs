@@ -3,24 +3,26 @@ using UnityEngine;
 namespace Tatva
 {
     /// <summary>
-    /// The only component in the scene. Builds the camera, mesh, audio and UI in code,
+    /// The only component in the scene. Builds the camera, meshes, audio and UI in code,
     /// runs the simulation and routes its events to sound, effects, haptics and the HUD.
     /// </summary>
     public sealed class GameRoot : MonoBehaviour
     {
-        const string BestKey = "tatva.best", ControlKey = "tatva.control", GainKey = "tatva.gain2"; // v1.4 recalibrated the scale; old saved values are ignored
+        // v2.0 (SpeedX-style rework) scores differently, so it keeps its own record
+        const string BestKey = "tatva.best2", ControlKey = "tatva.control", GainKey = "tatva.gain2";
         static readonly float[] Gains = { 0.85f, 1f, 1.25f, 1.6f, 2f };
 
         Camera cam;
+        Transform overlay;
         Painter painter;
-        TunnelRenderer view;
+        TrackRenderer view;
         SynthHost audioHost;
         Sim sim;
         Steering steering;
         Hud hud;
         readonly SteerLog log = new SteerLog();
         bool paused, music, overShown;
-        int best, hudScore = -1, hudMult = -1;
+        int best, hudScore = -1, hudMult = -1, hudSpeed = -1, hudChips = -1;
         float lastCut = -1;
 
         void Awake()
@@ -31,7 +33,7 @@ namespace Tatva
             ScaleRendering();
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
             AllowRotation();
-            Input.multiTouchEnabled = false;
+            Input.multiTouchEnabled = true; // touch mode boosts with two fingers
 
             best = PlayerPrefs.GetInt(BestKey, 0);
             steering = new Steering
@@ -42,28 +44,36 @@ namespace Tatva
             if (!Steering.HasGyro) steering.Mode = Control.Touch;
             steering.Enable();
 
-            // camera: orthographic, 1 unit = 1 pixel, origin at the screen centre
+            // camera: perspective, placed and projected by TrackRenderer every frame
             var camGo = new GameObject("Camera", typeof(Camera), typeof(AudioListener));
             camGo.transform.SetParent(transform, false);
-            camGo.transform.position = new Vector3(0, 0, -10);
             cam = camGo.GetComponent<Camera>();
-            cam.orthographic = true;
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.nearClipPlane = 0.1f; cam.farClipPlane = 100f;
             cam.allowHDR = false; cam.allowMSAA = true;
-            camGo.AddComponent<BloomEffect>();
+            var bloom = camGo.AddComponent<BloomEffect>();
+            bloom.Intensity1 = 0.55f; bloom.Intensity2 = 0.45f; // the lit floor would wash out at the old strength
             audioHost = camGo.AddComponent<SynthHost>();
 
+            view = new TrackRenderer();
+            var trackGo = new GameObject("Track", typeof(MeshFilter), typeof(MeshRenderer));
+            trackGo.transform.SetParent(transform, false);
+            trackGo.GetComponent<MeshFilter>().sharedMesh = view.Solid;
+            var tr = trackGo.GetComponent<MeshRenderer>();
+            tr.sharedMaterial = new Material(Resources.Load<Shader>("Shaders/TatvaSolid"));
+            tr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            tr.receiveShadows = false;
+
+            // 2D effects: a pixel-scaled plane glued in front of the camera
             painter = new Painter();
-            var meshGo = new GameObject("Tunnel", typeof(MeshFilter), typeof(MeshRenderer));
-            meshGo.transform.SetParent(transform, false);
-            meshGo.GetComponent<MeshFilter>().sharedMesh = painter.Mesh;
-            var mr = meshGo.GetComponent<MeshRenderer>();
-            mr.sharedMaterial = new Material(Resources.Load<Shader>("Shaders/TatvaPrim"));
+            var fxGo = new GameObject("Overlay", typeof(MeshFilter), typeof(MeshRenderer));
+            fxGo.transform.SetParent(camGo.transform, false);
+            overlay = fxGo.transform;
+            fxGo.GetComponent<MeshFilter>().sharedMesh = painter.Mesh;
+            var mr = fxGo.GetComponent<MeshRenderer>();
+            mr.sharedMaterial = new Material(Resources.Load<Shader>("Shaders/TatvaPrim")) { renderQueue = 3100 };
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             mr.receiveShadows = false;
 
-            view = new TunnelRenderer();
             sim = new Sim(System.Environment.TickCount);
             sim.Reset(Mode.Title);
             Wire();
@@ -97,6 +107,9 @@ namespace Tatva
             resScale = RenderScale;
         }
 
+        Color Hsl(float h, float l = 75) => Painter.Hsl(h, 100, l, 1, false);
+        Vector2 FloatAt => view.ShipPos + new Vector2(0, 90);
+
         void Wire()
         {
             sim.Step += step =>
@@ -107,26 +120,42 @@ namespace Tatva
             {
                 view.OnGraze(sim);
                 Music.Graze(audioHost.Synth, audioHost.At);
-                hud.Float($"Hajszál! +{Hud.Fmt(pts)}", view.ShipPos * 0.82f, Painter.Hsl(sim.Hue + 40, 100, 75, 1, false), 64);
+                hud.Float($"Hajszál! +{Hud.Fmt(pts)}", FloatAt, Hsl(sim.Hue + 40), 64);
                 Haptics.Pulse(18, 120);
                 log.Event("graze", "pts=" + pts);
             };
-            sim.OrbTaken += (pts, streak) =>
+            sim.ShieldTaken += () =>
             {
-                view.OnOrb(sim);
-                Music.Orb(audioHost.Synth, audioHost.At, streak - 1);
-                hud.Float($"+{Hud.Fmt(pts)}", view.ShipPos * 0.82f, Painter.Hsl(sim.Hue + 150, 100, 75, 1, false), 48);
-                Haptics.Pulse(8, 70);
-                log.Event("orb", "streak=" + streak);
+                view.OnShield();
+                Music.Orb(audioHost.Synth, audioHost.At, 4);
+                hud.Float("Pajzs", FloatAt, Hsl(190), 56);
+                Haptics.Pulse(12, 90);
+                log.Event("shield");
+            };
+            sim.ShieldBroke += o =>
+            {
+                view.OnShieldBreak(sim, o);
+                Music.ShieldBreak(audioHost.Synth, audioHost.At);
+                Haptics.Pulse(120, 220);
+                log.Event("shieldbreak");
+            };
+            sim.Bombed += (pts, blasted) =>
+            {
+                view.OnBomb(sim, blasted);
+                Music.Bomb(audioHost.Synth, audioHost.At);
+                hud.Float($"Bumm! +{Hud.Fmt(pts)}", FloatAt, Hsl(0), 68);
+                Haptics.Pulse(200, 255);
+                log.Event("bomb", "n=" + blasted.Count);
             };
             sim.ZoneChanged += z =>
             {
                 Music.Zone(audioHost.Synth, audioHost.At);
                 audioHost.Synth.SetBpm(sim.BpmT);
-                hud.Banner(z, Painter.Hsl(Sim.PAL[z % 8], 100, 72, 1, false));
-                hud.SetZone(z);
+                hud.Banner(z, Hsl(Sim.PAL[z % 8], 72));
+                hud.SetZone(z, Sim.SHAPES[z % 8]);
                 Haptics.Pulse(40, 160);
             };
+            sim.DarkStarted += () => hud.Banner("V E S Z É L Y", "ÁRAMSZÜNET", Hsl(0, 65));
             sim.Died += () =>
             {
                 log.Death(sim);
@@ -146,9 +175,9 @@ namespace Tatva
             log.Begin(steering, sim);
             paused = false; overShown = false; music = true;
             audioHost.Synth.SetMuted(false);
-            hudScore = hudMult = -1;
+            hudScore = hudMult = hudSpeed = hudChips = -1;
             hud.ShowPlay(best);
-            hud.Banner(0, Painter.Hsl(Sim.PAL[0], 100, 72, 1, false));
+            hud.Banner(0, Hsl(Sim.PAL[0], 72));
             sim.Flash = 0.4f;
             audioHost.Synth.SetBpm(sim.BpmT);
             Music.Zone(audioHost.Synth, audioHost.At);
@@ -222,7 +251,6 @@ namespace Tatva
         {
             float dtR = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
             float w = Screen.width, h = Screen.height;
-            cam.orthographicSize = h / 2f;
             float dp = Mathf.Clamp(Screen.dpi > 0 ? Screen.dpi / 160f * resScale : h / 800f, 1f, 4f);
             view.Resize(w, h, dp);
 
@@ -238,7 +266,7 @@ namespace Tatva
                 if (hud.TitleVisible || overShown) StartGame(); else if (paused) SetPaused(false);
             }
 
-            var cmd = steering.Read(dtR, new Vector2(w / 2f, h / 2f), Mathf.Min(w, h) * 0.05f, sim.Theta);
+            var cmd = steering.Read(dtR, w, sim.Theta);
             if (!paused)
             {
                 sim.Update(dtR, cmd);
@@ -258,17 +286,19 @@ namespace Tatva
             {
                 if (sim.Score != hudScore) { hudScore = sim.Score; hud.SetScore(sim.Score); }
                 if (sim.Mult != hudMult) { hud.SetMult(sim.Mult, sim.Mult > hudMult && hudMult > 0); hudMult = sim.Mult; }
+                int spd = Mathf.RoundToInt(sim.V * Sim.KMH);
+                if (spd != hudSpeed) { hudSpeed = spd; hud.SetSpeed(spd); }
+                int chips = (sim.Shield ? 1 : 0) | (sim.Boosting ? 2 : 0);
+                if (chips != hudChips) { hudChips = chips; hud.SetChips(sim.Shield, sim.Boosting); }
             }
 
             float cut = sim.Mode == Mode.Dead ? 420 : sim.Ts < 0.75f ? 900 : 20000;
             if (cut != lastCut) { lastCut = cut; audioHost.Synth.SetCutoff(cut); }
 
             // frame
-            cam.backgroundColor = Painter.Hsl(sim.Hue, 45, 3.5f, 1, false);
-            float sk = sim.Shake * sim.Shake * 30 * dp;
-            cam.transform.position = new Vector3(Random.Range(-sk, sk), Random.Range(-sk, sk), -10);
             view.Draw(sim, painter);
             painter.Upload();
+            view.ApplyCamera(cam, overlay);
             hud.Tick(dtR, sim.Hue);
         }
     }

@@ -32,7 +32,7 @@ namespace Tatva
         readonly Font font;
         readonly Sprite pill;
         readonly GameObject hudRoot, titleRoot, overRoot, pauseRoot;
-        readonly Text score, mult, zoneNo, zoneName, best, title, tagline, controlLabel, sensLabel, hint, titleBest;
+        readonly Text score, mult, zoneNo, zoneName, speed, chips, title, tagline, controlLabel, sensLabel, hint, titleBest;
         readonly Text overZone, overTitle, overScore, overStats, bannerZone, bannerName;
         readonly Button controlBtn, sensBtn;
         readonly List<(Text t, float life, float max, Vector2 p)> floats = new List<(Text, float, float, Vector2)>();
@@ -71,8 +71,9 @@ namespace Tatva
             score = Label(hudRoot, "0", 104, Ink, TextAnchor.UpperCenter, new Vector2(0.5f, 1), new Vector2(0, -24), new Vector2(700, 130), FontStyle.Bold);
             Glow(score, new Color(1f, 0.24f, 0.6f, 0.55f));
             mult = Label(hudRoot, "×1", 46, Gold, TextAnchor.UpperCenter, new Vector2(0.5f, 1), new Vector2(0, -150), new Vector2(300, 64), FontStyle.Bold);
-            Label(hudRoot, "Rekord", 28, Mist, TextAnchor.UpperRight, new Vector2(1, 1), new Vector2(-40, -36), new Vector2(400, 40));
-            best = Label(hudRoot, "0", 40, Ink, TextAnchor.UpperRight, new Vector2(1, 1), new Vector2(-40, -74), new Vector2(400, 56), FontStyle.Bold);
+            chips = Label(hudRoot, "", 28, Ice, TextAnchor.UpperLeft, new Vector2(0, 1), new Vector2(40, -134), new Vector2(500, 40), FontStyle.Bold);
+            Label(hudRoot, "Sebesség", 28, Mist, TextAnchor.UpperRight, new Vector2(1, 1), new Vector2(-40, -36), new Vector2(400, 40));
+            speed = Label(hudRoot, "0 km/h", 40, Ink, TextAnchor.UpperRight, new Vector2(1, 1), new Vector2(-40, -74), new Vector2(400, 56), FontStyle.Bold);
             var pauseBtn = MakeButton(hudRoot, "II", new Vector2(1, 1), new Vector2(-40 - 60, -170), new Vector2(120, 100), 40, false);
             pauseBtn.onClick.AddListener(() => Pause?.Invoke());
 
@@ -88,7 +89,7 @@ namespace Tatva
             title = Label(titleRoot, "TÁTVA", 250, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.72f), Vector2.zero, new Vector2(1080, 300), FontStyle.Bold);
             Glow(title, new Color(1f, 0.24f, 0.6f, 0.6f));
             Dual(title, new Vector2(0.3f, 0.62f), Vector2.zero);
-            tagline = Label(titleRoot, "A L A G Ú T F U T A M   A   R I T M U S R A", 26, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.72f), new Vector2(0, -170), new Vector2(1000, 40));
+            tagline = Label(titleRoot, "F É N Y S E B E S S É G   A   R I T M U S R A", 26, Ink, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.72f), new Vector2(0, -170), new Vector2(1000, 40));
             Dual(tagline, new Vector2(0.3f, 0.62f), new Vector2(0, -170), new Vector2(900, 40));
             var startBtn = MakeButton(titleRoot, "INDÍTÁS", new Vector2(0.5f, 0.5f), new Vector2(0, 40), new Vector2(560, 150), 56, true);
             startBtn.onClick.AddListener(() => Start?.Invoke());
@@ -186,17 +187,16 @@ namespace Tatva
             sensLabel.text = $"Érzékenység: {gain.ToString("0.0#", Hu)}×";
             sensBtn.gameObject.SetActive(control != Control.Touch);
             hint.text = control == Control.Touch
-                ? "Érintsd meg a kör bármely pontját, a hajó odafordul.\nSúrold a falakat a hajszál-bónuszért, gyűjtsd a fénygömböket."
+                ? "Tartsd az ujjad a képernyő bal vagy jobb oldalán a kanyarodáshoz.\nKét ujj: turbó. Kék gyémánt: pajzs, piros csempe: bomba."
                 : hasGyro
-                    ? "Forgasd a telefont, mint egy kormányt. A hajó csak\nforgatás közben mozog: lassú forgatás alig mozdítja,\ngyors rántás messzire viszi. Ha megállsz, megáll."
+                    ? "Forgasd a telefont, mint egy kormányt: a hajó csak\nforgatás közben mozog, ha megállsz, megáll.\nTartsd az ujjad a képernyőn: turbó (×1,5 pont)."
                     : "Ezen az eszközön nincs giroszkóp, az érintéses irányítás működik.";
         }
 
         public void ShowPlay(int bestScore)
         {
             ShowOnly(hudRoot);
-            best.text = Fmt(bestScore);
-            SetScore(0); SetMult(1, false); SetZone(0);
+            SetScore(0); SetMult(1, false); SetZone(0, Sim.SHAPES[0]); SetSpeed(0); SetChips(false, false);
         }
 
         public void ShowPause(bool on) => ShowOnly(on ? pauseRoot : hudRoot);
@@ -208,7 +208,7 @@ namespace Tatva
             overTitle.text = record ? "Új rekord!" : "Becsapódás";
             overTitle.color = record ? Gold : Ink;
             overScore.text = Fmt(s.Score);
-            overStats.text = $"Hajszál  {Fmt(s.Grazes)}     Gömb  {Fmt(s.Orbs)}     Ütem  {Fmt(s.Beats)}\nRekord  {Fmt(bestScore)}";
+            overStats.text = $"Hajszál  {Fmt(s.Grazes)}     Táv  {Fmt(Mathf.FloorToInt(s.Dist))} m     Csúcs  {Fmt(Mathf.RoundToInt(s.MaxV * Sim.KMH))} km/h\nRekord  {Fmt(bestScore)}";
         }
 
         public bool TitleVisible => titleRoot.activeSelf;
@@ -216,12 +216,17 @@ namespace Tatva
         // ---------- HUD values ----------
         public void SetScore(int v) => score.text = Fmt(v);
         public void SetMult(int v, bool pop) { mult.text = "×" + v; if (pop) multPop = 1; }
-        public void SetZone(int z) { zoneNo.text = $"Zóna {z + 1}"; zoneName.text = Sim.ZNAMES[z % 8]; }
+        public void SetZone(int z, int shape) { zoneNo.text = $"Zóna {z + 1} · {Sim.ShapeName(shape)}"; zoneName.text = Sim.ZNAMES[z % 8]; }
+        public void SetSpeed(int kmh) => speed.text = Fmt(kmh) + " km/h";
+        public void SetChips(bool shield, bool boost) => chips.text = (shield ? "PAJZS   " : "") + (boost ? "<color=#ffd25e>TURBÓ ×1,5</color>" : "");
 
-        public void Banner(int z, Color col)
+        public void Banner(int z, Color col) =>
+            Banner($"Z Ó N A   {z + 1}   ·   {Sim.ShapeName(Sim.SHAPES[z % 8]).ToUpper(Hu)}", Sim.ZNAMES[z % 8].ToUpper(Hu), col);
+
+        public void Banner(string top, string name, Color col)
         {
-            bannerZone.text = $"Z Ó N A   {z + 1}";
-            bannerName.text = Sim.ZNAMES[z % 8].ToUpper(Hu);
+            bannerZone.text = top;
+            bannerName.text = name;
             bannerName.color = col;
             bannerT = 0;
         }

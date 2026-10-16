@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace Tatva
 {
@@ -20,8 +21,7 @@ namespace Tatva
         public float Gain = 1.25f;
 
         float est = Sim.Bottom, lastMeas, gyroSign = 1, signVotes, snap;
-        bool init, haveLast, hasTouch;
-        float touchAngle;
+        bool init, haveLast;
 
         public static bool HasGyro => SystemInfo.supportsGyroscope;
 
@@ -39,7 +39,7 @@ namespace Tatva
             Input.gyro.updateInterval = 1f / 60f;
         }
 
-        public void Recenter() { init = false; hasTouch = false; snap = 0; mapper.Reset(); }
+        public void Recenter() { init = false; snap = 0; mapper.Reset(); }
 
         /// <summary>
         /// The sensors report in the device's natural (portrait) axes; the game steers in screen axes.
@@ -67,30 +67,44 @@ namespace Tatva
         /// <summary>Current steering angle for UI feedback (title-screen indicator).</summary>
         public float Estimate => est;
 
-        public SteerCmd Read(float dt, Vector2 screenCenter, float deadRadius, float theta)
+        /// <summary>
+        /// Gyro mode: the phone steers, a finger held anywhere on the screen boosts.
+        /// Touch mode: hold the left or right side to turn (further from the centre = faster), two fingers boost.
+        /// Fingers on UI buttons are ignored.
+        /// </summary>
+        public SteerCmd Read(float dt, float screenWidth, float theta)
         {
+            int n = 0; float sx = 0;
+            var es = EventSystem.current;
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                var t = Input.GetTouch(i);
+                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled) continue;
+                if (es != null && es.IsPointerOverGameObject(t.fingerId)) continue;
+                n++; sx += t.position.x;
+            }
+            if (Input.touchCount == 0 && Input.GetMouseButton(0) && (es == null || !es.IsPointerOverGameObject())) { n = 1; sx = Input.mousePosition.x; }
+
+            bool gyro = Mode != Control.Touch && HasGyro;
+            bool boostKey = Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.LeftShift);
+            var cmd = new SteerCmd { Boost = boostKey || (gyro ? n >= 1 : n >= 2) };
+
             float axis = 0;
             if (Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.A)) axis -= 1;
             if (Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.D)) axis += 1;
-            if (axis != 0) return new SteerCmd { Axis = axis };
+            if (axis != 0) { cmd.Axis = axis; return cmd; }
 
-            if (Mode != Control.Touch && HasGyro)
+            if (gyro)
             {
                 float rate = ReadGyro(dt);
                 float target = mapper.Step(rate, Gain, dt, theta);
                 LastRate = rate; LastShip = RateToShip(rate, Gain); LastClamped = mapper.Clamped;
-                return new SteerCmd { HasTunnelTarget = true, Target = target };
+                cmd.HasTunnelTarget = true; cmd.Target = target;
+                return cmd;
             }
 
-            Vector2? p = null;
-            if (Input.touchCount > 0) p = Input.GetTouch(0).position;
-            else if (Input.GetMouseButton(0)) p = Input.mousePosition;
-            if (p.HasValue)
-            {
-                Vector2 d = p.Value - screenCenter;
-                if (d.sqrMagnitude > deadRadius * deadRadius) { touchAngle = Mathf.Atan2(d.y, d.x); hasTouch = true; }
-            }
-            return hasTouch ? new SteerCmd { HasTarget = true, Target = touchAngle } : default;
+            if (n > 0) cmd.Axis = Mathf.Clamp((sx / n - screenWidth / 2) / (screenWidth * 0.16f), -1, 1);
+            return cmd;
         }
 
         // ---------- rotation-speed mapping (v1.6) ----------

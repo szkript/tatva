@@ -2,6 +2,8 @@
 
 Unity 6 (6000.5.4f1) port of `../index.html`. Built-in render pipeline, legacy Input (for `Input.gyro`), uGUI. Everything (scene, UI, meshes, sound) is generated from code, so the project is built and tested without opening the Editor.
 
+**v2.0: SpeedX-style rework** (port of the web version on the `speedx` branch). A chase camera flies over a checkerboard track whose cross-section morphs per zone: inside of a tube, flat plain, outside of a tube. Obstacles are blocks, scatter, pyramids, snake corridors, sliding blocks and rising columns. Blue diamonds give a shield, red tiles are bombs, and from zone 3 there are blackout stretches. Speed rises from about 230 to 830 km/h. Holding a finger on the screen boosts (x1.45 speed, x1.5 score). The lateral position is still an angle (one lap = 2 pi), so the gyro steering below carries over unchanged. The record is kept under `tatva.best2`. Rendering uses a perspective camera with a depth buffer and the `Tatva/Solid` edge shader (`TrackRenderer`); the 2D effects ride on the Painter overlay glued in front of the camera.
+
 ## Orientation
 
 Landscape only (manifest `userLandscape`). The menus flip between the two landscape sides; a run locks the side it started on, so turning the phone to steer cannot rotate the screen. v1.1 allowed portrait and rotated at runtime, but on the owner's phone it stayed in portrait (without rotation lock); declaring landscape in the manifest (v1.2) fixed it.
@@ -15,12 +17,13 @@ Landscape only (manifest `userLandscape`). The menus flip between the two landsc
 - **Sensor fusion:** the gyro rate around the screen normal is integrated and pulled gently (2.5/s) toward gravity's direction in the screen plane, so it also works with the phone lying flat. Gravity is rotated into screen axes per orientation, the gyro axis sign is learned from gravity, and the first reading of a run snaps by a quarter turn if a device reports its axes differently.
 - **Rejected:** v1.5 hybrid (tilt up to 10 degrees = position, beyond = circling): holding a tilt kept the ship moving and rotating back was hard. v1.0 "marble" absolute steering (the ship went to real-world down, so you had to turn the phone all the way round). v1.3/v1.4 pure rate control (tilt = speed) was called too slow to react, *not* too sensitive; softening it was the wrong direction.
 - The title screen toggles the control mode (gyroscope / gyroscope inverted / touch) and the sensitivity (0.85×–2×, default 1.25×, saved under `tatva.gain2`).
-- Touch: tap anywhere on the ring and the ship turns there. In the Editor the ←/→ keys also steer.
+- Gyro mode: a finger held anywhere on the screen (not on a button) = boost.
+- Touch mode: hold the left or right side to turn (further from the centre = faster); two fingers = boost. In the Editor ←/→ steer and ↑/W/Shift boost.
 - The Android back button pauses; on the title screen it quits.
 
 Not yet confirmed on a device: how v1.6's rotation-speed steering feels in the hand.
 
-**Steering telemetry (v1.7):** every run writes a per-frame CSV (`SteerLog`) to `/sdcard/Android/data/com.kkodelab.tatva/files/steerlogs/` (newest 40 kept). Each frame records raw gyro xyz, gravity, axis sign, rate used, ship command, target, ship angle and speed, lead clamp, the error to the nearest free gap (`gap`, from `Sim.AiTarget`) and the time to the next wall. Deaths record the walls alongside the ship. With the phone plugged in, run `python Tools/steer_report.py` (`--all` reports every run). It pulls the logs into `../logs/steerlogs` and reports the axis share, noise and bias, the ship/phone ratio by turn speed, stop delay and coasting, corrections, time at the speed limit, and a classified cause for each death (no input / wrong way / overshoot / too slow / late) with a timeline of the last 1.2 s.
+**Steering telemetry (v1.7):** every run writes a per-frame CSV (`SteerLog`) to `/sdcard/Android/data/com.kkodelab.tatva/files/steerlogs/` (newest 40 kept). Each frame records raw gyro xyz, gravity, axis sign, rate used, ship command, target, ship angle and speed, lead clamp, the error to the nearest free gap (`gap`, from `Sim.AiTarget`) and the time to the next wall. Deaths record the obstacles alongside the ship (in v2.0 as track angles: centre, width, clearance). With the phone plugged in, run `python Tools/steer_report.py` (`--all` reports every run). It pulls the logs into `../logs/steerlogs` and reports the axis share, noise and bias, the ship/phone ratio by turn speed, stop delay and coasting, corrections, time at the speed limit, and a classified cause for each death (no input / wrong way / overshoot / too slow / late) with a timeline of the last 1.2 s.
 
 **Performance:** the game renders at 75% of native resolution with 2x MSAA (`GameRoot.RenderScale`). At full resolution with 4x MSAA plus the bloom chain, a Galaxy A71 ran at ~41 fps; now it holds a steady 60 (measured with `dumpsys SurfaceFlinger --latency`).
 
@@ -42,8 +45,8 @@ Don't trust the exit code. Check the log: `\): error ` must be 0, and the log mu
 ## Layout
 
 - `Scripts/Core/Sim.cs`: rules, level generator, AI pilot (pure C#, self-tested)
-- `Scripts/Render/`: `Painter` (one dynamic mesh per frame, feathered neon primitives), `TunnelRenderer` (port of the canvas drawing code), `BloomEffect` + `Resources/Shaders/`
+- `Scripts/Render/`: `Painter` (one dynamic mesh per frame, feathered neon primitives), `TrackRenderer` (per-frame 3D track mesh + 2D effects), `BloomEffect` + `Resources/Shaders/`
 - `Scripts/Audio/Synth.cs`: sample-level synth on the audio thread (`OnAudioFilterRead`); `Music` = song + SFX
-- `Scripts/Input/Steering.cs`: gyro fusion, hybrid tilt mapping (`TiltMapper`), touch, haptics
+- `Scripts/Input/Steering.cs`: gyro fusion, rotation-speed mapping (`RotationMapper`), touch, boost, haptics
 - `Scripts/UI/Hud.cs`: all screens built in code
 - `Editor/BuildTools.cs`: SetupScene, ConfigureAndroid (+ generated icon), SelfTest, Snapshot, BuildAndroid

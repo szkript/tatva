@@ -58,12 +58,14 @@ namespace Tatva
             t += dt;
             if (s.SignFlips != lastFlips) { lastFlips = s.SignFlips; Event("signflip", "sign=" + F(s.GyroSign)); }
 
+            // time to the next obstacle in the ship's way, and the demo pilot's free spot as the "gap"
             float wallT = -1, gap = 0;
             float sMin = float.PositiveInfinity;
-            foreach (var o in sim.Obs) if (o.Wall && !o.Done && o.S - sim.Dist > -o.Th && o.S < sMin) sMin = o.S;
+            foreach (var o in sim.Obs)
+                if (IsSolid(o) && o.S + o.D / 2 > sim.Dist && o.S < sMin && sim.Clearance(o) < 0.3f) sMin = o.S;
             if (!float.IsInfinity(sMin))
             {
-                wallT = (sMin - sim.Dist) / Mathf.Max(0.01f, sim.Velocity * sim.Ts);
+                wallT = Mathf.Max(0, sMin - sim.Dist) / Mathf.Max(0.01f, sim.V * sim.Ts);
                 gap = Sim.AngDiff(sim.AiTarget(), sim.Theta);
             }
 
@@ -84,17 +86,22 @@ namespace Tatva
             sb.Append("#E,").Append(F(t)).Append(',').Append(name).Append(',').Append(detail).Append('\n');
         }
 
-        /// <summary>Death: the ship angle and every wall alongside it (dz, arc start, arc width, signed distance; &lt;0 = inside).</summary>
+        static bool IsSolid(Obstacle o) => !o.Dead && (o.K == Kind.Box || o.K == Kind.Pyr);
+
+        /// <summary>
+        /// Death: the ship angle and every obstacle alongside it, in track angles like the old walls
+        /// (ds, centre angle, angular width, signed clearance; &lt;0 = overlapping).
+        /// </summary>
         public void Death(Sim sim)
         {
             if (path == null) return;
             sb.Append("#D,").Append(F(t)).Append(",theta=").Append(F(sim.Theta)).Append(",omega=").Append(F(sim.Omega))
-              .Append(",score=").Append(sim.Score).Append(",beats=").Append(sim.Beats).Append('\n');
+              .Append(",score=").Append(sim.Score).Append(",dist=").Append(F(sim.Dist)).Append('\n');
             foreach (var o in sim.Obs)
             {
-                if (!o.Wall || Mathf.Abs(o.S - sim.Dist) > o.Th + 0.5f) continue;
-                sb.Append("#W,").Append(F(o.S - sim.Dist)).Append(',').Append(F(o.A)).Append(',').Append(F(o.W)).Append(',')
-                  .Append(F(Sim.ArcInfo(sim.Theta, o.A, o.W))).Append('\n');
+                if (o.K != Kind.Box && o.K != Kind.Pyr || Mathf.Abs(o.S - sim.Dist) > o.D / 2 + 0.5f) continue;
+                sb.Append("#W,").Append(F(o.S - sim.Dist)).Append(',').Append(F(Sim.Mod(sim.ObsU(o) / Sim.R))).Append(',').Append(F(o.W / Sim.R)).Append(',')
+                  .Append(F(sim.Clearance(o) / Sim.R)).Append('\n');
             }
             End();
         }
